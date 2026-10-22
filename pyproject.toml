@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stardelt"
+version = "0.1.0"
+description = "Small helper between a stardelt notebook and the warehouse (sql, write_df, spark)"
+readme = "stardelt/README.md"
+license = { file = "stardelt/LICENSE" }
+requires-python = ">=3.11"
+dependencies = ["pandas", "requests", "trino"]
+
+[project.optional-dependencies]
+# The Spark Connect client must be on the same Spark line as the platform's server:
+# a newer client mis-parses the server's settings and every createDataFrame fails
+# with an opaque int() error (platform#399). The notebook image pins the exact
+# version; this range states what the library is tested against.
+spark = ["pyspark[connect]>=4.1,<4.3"]
+test = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["stardelt"]
