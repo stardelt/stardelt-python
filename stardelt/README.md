@@ -6,10 +6,11 @@ signed-in hub user), `stardelt.write_df` (governed DataFrame writes),
 connection to an outside system: your own or your group's; values are read from the secret store when you ask,
 never kept or printed).
 
-Pure Python, MIT. Installed in the image (`images/jupyter/Dockerfile`);
-tested in CI (`images/jupyter/tests/`, the `notebook-helper` job in
-`.github/workflows/ci.yml`). The full contract is the docstrings in
-`__init__.py` — this file exists so the build backend has a readme.
+Pure Python, MIT. This repository is the library's home: the platform's
+notebook image installs a **pinned release** of it, and both this repository's
+CI (`tests/`) and the platform's `notebook-helper` job run the tests at that
+pinned ref. The full contract is the docstrings in `__init__.py` — this file
+exists so the build backend has a readme.
 
 ## Notebook tasks: `python -m stardelt.notebook_run`
 

@@ -487,7 +487,7 @@ def spark_tips() -> None:
     Every notebook talks to the same driver: 1 GiB heap in a 3 GiB pod since
     platform#372, ``spark.driver.maxResultSize`` 512 MiB, at most 2 executors of
     1 core / 1 GiB. Prints the seven rows of the README table ("Keeping the
-    shared driver healthy" in ``images/jupyter/stardelt/README.md``), one plain
+    shared driver healthy" in the helper's README), one plain
     line per row. Nothing runs and no session is opened, so it is safe as the
     first cell of a notebook.
     """
@@ -637,7 +637,7 @@ def spark(app_name="stardelt-notebook"):
     never printed or returned.
 
     Keep the shared driver small: see ``stardelt.spark_tips()`` for the patterns
-    that do (the cheat sheet is also in ``images/jupyter/stardelt/README.md``).
+    that do (the cheat sheet is also in the helper's README).
     """
     from pyspark.sql import SparkSession
 
