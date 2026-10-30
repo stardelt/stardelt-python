@@ -52,6 +52,10 @@ class StubConnection:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.statements = []
+        self.schema = kwargs.get('schema') or None
+        self.catalog = kwargs.get('catalog') or None
+        self.transaction = None
+        self.autocommit = False
         StubConnection.instances.append(self)
 
     def cursor(self):
@@ -59,6 +63,30 @@ class StubConnection:
 
     def close(self):
         pass
+
+    @property
+    def connection(self):
+        return self
+
+    def execute(self, *args, **kwargs):
+        cur = self.cursor()
+        if args and hasattr(args[0], 'text'):
+            cur.execute(args[0].text, args[1] if len(args) > 1 else None)
+        elif args:
+            cur.execute(args[0], args[1] if len(args) > 1 else None)
+        else:
+            cur.execute(kwargs.get('statement'))
+        return cur
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def start_transaction(self):
+        self.transaction = object()
+        return self.transaction
 
 
 @pytest.fixture

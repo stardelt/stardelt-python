@@ -43,7 +43,7 @@ from trino.dbapi import connect as _trino_connect
 
 from stardelt.connections import ConnectionUnavailable, connection
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 __all__ = ["sql", "write_df", "spark", "spark_tips", "connection", "ConnectionUnavailable"]
 
