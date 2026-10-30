@@ -9,6 +9,7 @@ a pandas DataFrame *into* an Iceberg table. This package is that loop, short:
 
     trips = stardelt.sql("SELECT * FROM warehouse.demo.trips LIMIT 10")
     stardelt.write_df(trips, "warehouse.demo.trips_sample", mode="create")
+    stardelt.publish("my.ipynb")  # a versioned copy, for scheduling
     spark = stardelt.spark()  # Spark Connect, for what does not fit write_df
 
 Identity comes from the pod, never from an argument: JupyterHub copies the
@@ -42,10 +43,19 @@ from trino.auth import JWTAuthentication
 from trino.dbapi import connect as _trino_connect
 
 from stardelt.connections import ConnectionUnavailable, connection
+from stardelt.publish import publish
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
-__all__ = ["sql", "write_df", "spark", "spark_tips", "connection", "ConnectionUnavailable"]
+__all__ = [
+    "sql",
+    "write_df",
+    "publish",
+    "spark",
+    "spark_tips",
+    "connection",
+    "ConnectionUnavailable",
+]
 
 # write_df refuses more than this many rows: above it the per-batch INSERT
 # path is the wrong tool (slow, one HTTP round trip per batch) and the right

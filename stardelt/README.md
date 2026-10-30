@@ -130,3 +130,11 @@ connection uses the helper's identity and opens a fresh connection per
 statement so token refresh is respected. Telemetry is disabled by default.
 `%sqlcmd tables`, `%sqlcmd columns -t <table>`, `%sqlcmd profile -t <table>`
 and `%sqlplot` are available when supported by JupySQL.
+
+## Publishing a notebook
+
+`stardelt.publish("my.ipynb")` sends the notebook to Nova, signed with the same
+token as `sql()`; Nova strips the cell outputs and stores one immutable version
+(a schedule pins it). The group defaults to your only group from the token;
+when you are in several, pass `group=`. The call prints and returns
+`name`, `group`, `version`, `sha256` and the parsed `parameters`.
