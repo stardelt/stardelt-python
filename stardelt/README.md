@@ -106,3 +106,27 @@ Executors: at most 2 x 1 core x 1 GiB today; sizes are designed in platform#375.
 fails with `maxResultSize`, write the result to a table instead of raising the limit.
 
 `stardelt.spark_tips()` prints the seven rows into a notebook, so they are one cell away.
+
+## SQL in notebooks (JupySQL)
+
+The image loads `stardelt.sqlmagic` at startup and registers a default JupySQL
+connection named `warehouse`. Use SQL directly in cells:
+
+```sql
+%sql select 1
+```
+
+```sql
+%%sql
+select * from warehouse.demo.trips limit 10
+```
+
+```sql
+%sql --connections
+```
+
+Binding notebook variables uses JupySQL variable binding (`:name`). The
+connection uses the helper's identity and opens a fresh connection per
+statement so token refresh is respected. Telemetry is disabled by default.
+`%sqlcmd tables`, `%sqlcmd columns -t <table>`, `%sqlcmd profile -t <table>`
+and `%sqlplot` are available when supported by JupySQL.
