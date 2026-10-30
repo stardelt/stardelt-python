@@ -138,3 +138,7 @@ token as `sql()`; Nova strips the cell outputs and stores one immutable version
 (a schedule pins it). The group defaults to your only group from the token;
 when you are in several, pass `group=`. The call prints and returns
 `name`, `group`, `version`, `sha256` and the parsed `parameters`.
+
+## Catalog browser
+
+`stardelt.browse()` opens a side panel (or inline fallback) to browse catalogs, schemas, and tables with columns and preview.

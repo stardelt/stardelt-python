@@ -45,12 +45,19 @@ from trino.dbapi import connect as _trino_connect
 from stardelt.connections import ConnectionUnavailable, connection
 from stardelt.publish import publish
 
-__version__ = "0.1.3"
+try:
+    from stardelt import browse as _browse_module
+    browse = _browse_module.browse
+except Exception:
+    browse = None
+
+__version__ = "0.1.4"
 
 __all__ = [
     "sql",
     "write_df",
     "publish",
+    "browse",
     "spark",
     "spark_tips",
     "connection",
