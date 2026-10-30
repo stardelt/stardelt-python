@@ -157,3 +157,19 @@ when you are in several, pass `group=`. The call prints and returns
 ## Catalog browser
 
 `stardelt.browse()` opens a side panel (or inline fallback) to browse catalogs, schemas, and tables with columns and preview.
+
+## Command line
+
+`pip install stardelt` also installs a `stardelt` command, a thin client for shells, CI and
+agents over Nova's public API. It needs a Nova URL and a bearer token in the environment:
+
+```bash
+export STARDELT_NOVA_URL=https://nova.example.com
+export STARDELT_TOKEN=...            # `stardelt login` comes later
+stardelt whoami
+stardelt sql "select 1 as x" --format json     # table (default), json or csv
+stardelt sql "select * from warehouse.demo.trips" --max-rows 20
+```
+
+Results go to stdout, messages to stderr. Exit codes: `0` ok, `1` error, `2` wrong usage,
+`3` authentication needed. A token is never printed.
