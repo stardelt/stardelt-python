@@ -39,7 +39,7 @@ from urllib.parse import urlsplit
 
 import pandas as pd
 import requests
-from trino.auth import JWTAuthentication
+from trino.auth import Authentication, JWTAuthentication
 from trino.dbapi import connect as _trino_connect
 
 from stardelt.connections import ConnectionUnavailable, connection
@@ -51,7 +51,7 @@ try:
 except Exception:
     browse = None
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 __all__ = [
     "sql",
@@ -170,8 +170,31 @@ def _token():
     return token
 
 
-def _connect():
-    """A Trino connection as the signed-in hub user. Raises a one-line error."""
+class _LiveBearer(requests.auth.AuthBase):
+    """Puts the CURRENT token on every request, not the one from the day the connection opened."""
+
+    def __call__(self, request):
+        request.headers["Authorization"] = "Bearer " + _token()
+        return request
+
+
+class _LiveAuthentication(Authentication):
+    """For a connection that lives as long as the kernel (the `%sql` magic keeps one)."""
+
+    def set_http_session(self, http_session):
+        http_session.auth = _LiveBearer()
+        return http_session
+
+    def get_exceptions(self):
+        return ()
+
+
+def _connect(live=False):
+    """A Trino connection as the signed-in hub user. Raises a one-line error.
+
+    ``live=True`` re-reads the token on every request (renewing it near expiry), for a
+    connection that stays open; the default fixes the token when the connection opens.
+    """
     url = os.environ.get("TRINO_URL", "").strip()
     if not url:
         raise RuntimeError("TRINO_URL is not set — this notebook is not running on the platform.")
@@ -184,7 +207,7 @@ def _connect():
         host=parts.hostname,
         port=parts.port or (443 if parts.scheme == "https" else 8080),
         http_scheme=parts.scheme,
-        auth=JWTAuthentication(token),
+        auth=_LiveAuthentication() if live else JWTAuthentication(token),
         source="stardelt-notebook-helper",
     )
 

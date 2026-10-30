@@ -1,95 +1,77 @@
-"""Tests for JupySQL integration (stardelt.sqlmagic)."""
+"""The JupySQL integration (stardelt.sqlmagic). Needs the ``jupyter`` extra, as CI installs it:
+a test that skips when JupySQL is missing would stay green with the feature gone."""
+
 import os
-import sys
+import tomllib
+from pathlib import Path
 
 import pytest
+import requests
+from IPython.core.interactiveshell import InteractiveShell
+from sql.connection import ConnectionManager
+
+import stardelt
+import stardelt.sqlmagic as sqlmagic
+from tests.test_stardelt import StubConnection, _jwt
 
 
-def test_telemetry_disabled_by_default(monkeypatch):
-    try:
-        import sql  # noqa: F401
-    except Exception:
-        pytest.skip("jupysql not installed")
-    monkeypatch.delenv("PLOOMBER_STATS_ENABLED", raising=False)
-    # reload
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("stardelt.sqlmagic") or mod.startswith("sql"):
-            sys.modules.pop(mod)
-    import stardelt.sqlmagic  # noqa: F401
-    assert os.environ.get("PLOOMBER_STATS_ENABLED") == "false"
-
-
-def test_startup_loads_without_error():
-    import stardelt.sqlmagic  # noqa: F401
-
-
-def test_default_connection_registered(monkeypatch):
-    try:
-        from sql import connection as sql_connection
-    except Exception:
-        pytest.skip("jupysql not installed")
-    import stardelt
-    from tests.test_stardelt import StubConnection, _jwt
-    sql_connection.ConnectionManager.connections = {}
-    sql_connection.ConnectionManager.current = None
-    StubConnection.instances.clear()
+@pytest.fixture
+def shell(monkeypatch):
     monkeypatch.setenv("TRINO_URL", "https://trino.example:8443")
     monkeypatch.setenv("TRINO_TOKEN", _jwt("analyst"))
     monkeypatch.setattr(stardelt, "_trino_connect", StubConnection)
-    import stardelt.sqlmagic as sqlmagic  # noqa: F401
-    sqlmagic._configure_jupysql()
-    # should have registered warehouse
-    mgr = sql_connection.ConnectionManager
-    assert "warehouse" in mgr.connections or mgr.current is not None
-
-
-def test_engine_uses_the_helper_connection_per_statement(monkeypatch):
-    try:
-        import sql  # noqa: F401
-    except Exception:
-        pytest.skip("jupysql not installed")
-    import stardelt
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-    import stardelt.sqlmagic as sqlmagic
-    from tests.test_stardelt import StubConnection, _jwt
-
     StubConnection.instances.clear()
+    ConnectionManager.connections = {}
+    ConnectionManager.current = None
+    return InteractiveShell.instance()
+
+
+def test_loading_registers_the_warehouse_connection_and_switches_telemetry_off(shell):
+    shell.run_line_magic("load_ext", "stardelt.sqlmagic")
+    assert list(ConnectionManager.connections) == ["warehouse"]
+    assert os.environ["PLOOMBER_STATS_ENABLED"] == "false"
+
+
+def test_a_kernel_outside_the_platform_gets_a_warning_not_an_error(shell, monkeypatch):
+    monkeypatch.delenv("TRINO_URL")
+    with pytest.warns(UserWarning, match="no default connection"):
+        sqlmagic.load_ipython_extension(shell)
+    assert ConnectionManager.connections == {}
+
+
+def test_every_request_carries_the_current_token(monkeypatch):
+    monkeypatch.setenv("TRINO_URL", "https://trino.example:8443")
+    session = requests.Session()
+    stardelt._LiveAuthentication().set_http_session(session)
+    for who in ("analyst", "other"):
+        token = _jwt(who)
+        monkeypatch.setenv("TRINO_TOKEN", token)
+        prepared = requests.Request("GET", "https://trino.example:8443/v1/info").prepare()
+        session.auth(prepared)
+        assert prepared.headers["Authorization"] == "Bearer " + token
+
+
+def test_the_live_connection_does_not_fix_the_token_when_it_opens(monkeypatch):
     monkeypatch.setenv("TRINO_URL", "https://trino.example:8443")
     monkeypatch.setenv("TRINO_TOKEN", _jwt("analyst"))
     monkeypatch.setattr(stardelt, "_trino_connect", StubConnection)
-    engine = create_engine("trino://", creator=sqlmagic._creator, poolclass=NullPool)
-    conn = engine.connect()
-    conn.close()
-    assert len(StubConnection.instances) >= 1
-
-
-def test_token_change_is_seen_by_the_next_statement(monkeypatch):
-    try:
-        import sql  # noqa: F401
-    except Exception:
-        pytest.skip("jupysql not installed")
-    import stardelt
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.pool import NullPool
-    import stardelt.sqlmagic as sqlmagic
-    from tests.test_stardelt import StubConnection, _jwt
-
     StubConnection.instances.clear()
+    stardelt._connect(live=True)
+    stardelt._connect()
+    live, fixed = [c.kwargs["auth"] for c in StubConnection.instances]
+    assert isinstance(live, stardelt._LiveAuthentication)
+    assert not isinstance(fixed, stardelt._LiveAuthentication)
+
+
+def test_the_magics_connection_is_the_live_one(monkeypatch):
     monkeypatch.setenv("TRINO_URL", "https://trino.example:8443")
     monkeypatch.setenv("TRINO_TOKEN", _jwt("analyst"))
     monkeypatch.setattr(stardelt, "_trino_connect", StubConnection)
-    engine = create_engine("trino://", creator=sqlmagic._creator, poolclass=NullPool)
-    with engine.connect() as conn:
-        try:
-            conn.execute(text("SELECT 1"))
-        except Exception:
-            pass
-    monkeypatch.setenv("TRINO_TOKEN", _jwt("other"))
-    with engine.connect() as conn:
-        try:
-            conn.execute(text("SELECT 2"))
-        except Exception:
-            pass
-    # Different connections created
-    assert len(StubConnection.instances) >= 2
+    StubConnection.instances.clear()
+    sqlmagic._creator()
+    assert isinstance(StubConnection.instances[0].kwargs["auth"], stardelt._LiveAuthentication)
+
+
+def test_the_package_version_is_the_one_in_pyproject():
+    pyproject = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())
+    assert stardelt.__version__ == pyproject["project"]["version"]
