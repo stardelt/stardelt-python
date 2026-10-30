@@ -12,6 +12,21 @@ CI (`tests/`) and the platform's `notebook-helper` job run the tests at that
 pinned ref. The full contract is the docstrings in `__init__.py` — this file
 exists so the build backend has a readme.
 
+## The Nova API client: `stardelt.api`
+
+```python
+import stardelt.api
+
+nova = stardelt.api.Client()      # STARDELT_NOVA_URL and the notebook's own token
+nova.me()                         # the signed-in person, a dict
+nova.query("select 1 as x").to_pandas()
+```
+
+`Client(base_url=None, token=None)` sends the token as a bearer token (a string, or a function that returns
+one). An error answer from Nova becomes a `StardeltApiError` with Nova's one sentence and the HTTP status; a
+token never appears in a message or a `repr`. `query()` returns at most the rows Nova's cap allows; check
+`result.truncated`.
+
 ## Notebook tasks: `python -m stardelt.notebook_run`
 
 The pod a notebook task runs holds no storage credential: the DAG signs two URLs and the wrapper
