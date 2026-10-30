@@ -20,5 +20,8 @@ spark = ["pyspark[connect]>=4.1,<4.3"]
 jupyter = ["jupysql", "ipython", "sqlalchemy"]
 test = ["pytest"]
 
+[project.scripts]
+stardelt = "stardelt.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["stardelt"]
