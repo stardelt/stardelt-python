@@ -6,6 +6,10 @@ import pytest
 
 
 def test_telemetry_disabled_by_default(monkeypatch):
+    try:
+        import sql  # noqa: F401
+    except Exception:
+        pytest.skip("jupysql not installed")
     monkeypatch.delenv("PLOOMBER_STATS_ENABLED", raising=False)
     # reload
     for mod in list(sys.modules.keys()):
@@ -20,7 +24,10 @@ def test_startup_loads_without_error():
 
 
 def test_default_connection_registered(monkeypatch):
-    from sql import connection as sql_connection
+    try:
+        from sql import connection as sql_connection
+    except Exception:
+        pytest.skip("jupysql not installed")
     import stardelt
     from tests.test_stardelt import StubConnection, _jwt
     sql_connection.ConnectionManager.connections = {}
@@ -37,6 +44,10 @@ def test_default_connection_registered(monkeypatch):
 
 
 def test_engine_uses_the_helper_connection_per_statement(monkeypatch):
+    try:
+        import sql  # noqa: F401
+    except Exception:
+        pytest.skip("jupysql not installed")
     import stardelt
     from sqlalchemy import create_engine
     from sqlalchemy.pool import NullPool
@@ -54,6 +65,10 @@ def test_engine_uses_the_helper_connection_per_statement(monkeypatch):
 
 
 def test_token_change_is_seen_by_the_next_statement(monkeypatch):
+    try:
+        import sql  # noqa: F401
+    except Exception:
+        pytest.skip("jupysql not installed")
     import stardelt
     from sqlalchemy import create_engine, text
     from sqlalchemy.pool import NullPool
