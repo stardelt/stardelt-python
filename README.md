@@ -7,6 +7,7 @@ import stardelt
 
 stardelt.sql("select count(*) from warehouse.covid.covid_summary")
 stardelt.write_df(df, "bronze.raw.events")
+stardelt.publish("my.ipynb")   # a versioned copy of this notebook, for scheduling
 session = stardelt.spark()
 stardelt.spark_tips()          # how to keep the shared driver healthy
 ```
