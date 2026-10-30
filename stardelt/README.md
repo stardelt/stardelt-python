@@ -109,8 +109,9 @@ fails with `maxResultSize`, write the result to a table instead of raising the l
 
 ## SQL in notebooks (JupySQL)
 
-The image loads `stardelt.sqlmagic` at startup and registers a default JupySQL
-connection named `warehouse`. Use SQL directly in cells:
+`pip install "stardelt[jupyter]"`, then `%load_ext stardelt.sqlmagic` (the platform's notebook
+image does this when the kernel starts). It registers the default JupySQL connection
+`warehouse`, as the signed-in person:
 
 ```sql
 %sql select 1
@@ -121,15 +122,14 @@ connection named `warehouse`. Use SQL directly in cells:
 select * from warehouse.demo.trips limit 10
 ```
 
-```sql
-%sql --connections
-```
+`%sql --connections` lists the connection; `%sqlcmd tables`, `%sqlcmd columns -t <table>` and
+`%sqlplot` are JupySQL's own. Notebook variables bind with `:name`.
 
-Binding notebook variables uses JupySQL variable binding (`:name`). The
-connection uses the helper's identity and opens a fresh connection per
-statement so token refresh is respected. Telemetry is disabled by default.
-`%sqlcmd tables`, `%sqlcmd columns -t <table>`, `%sqlcmd profile -t <table>`
-and `%sqlplot` are available when supported by JupySQL.
+The connection stays open for the life of the kernel and sends the current token with every
+request, so a long session keeps working while the token is renewed. Loading it runs one
+`SELECT version()` (JupySQL asks the engine once; the query log shows it as a notebook
+statement). JupySQL's usage statistics are switched off. Outside the platform there is no
+Trino to reach: loading warns, it does not fail.
 
 ## Publishing a notebook
 

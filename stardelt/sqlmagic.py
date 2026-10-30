@@ -1,85 +1,46 @@
-"""JupySQL integration for stardelt notebooks."""
-import os
+"""JupySQL in a stardelt notebook: ``%sql`` and ``%%sql`` run as the signed-in person.
 
-from sqlalchemy import create_engine
-from sqlalchemy.pool import NullPool
+Load it with ``%load_ext stardelt.sqlmagic`` (the platform's notebook image does that when
+the kernel starts). It needs the ``jupyter`` extra: ``pip install "stardelt[jupyter]"``.
+
+The default connection is called ``warehouse``. It stays open for the life of the kernel, so
+it asks the library for the current token on every request instead of keeping the one it
+had at start (a token lives minutes, a kernel hours). The vendor telemetry of JupySQL is off.
+"""
+
+import os
+import warnings
 
 import stardelt
 
+ALIAS = "warehouse"
+
 
 def _creator():
-    return stardelt._connect()
+    return stardelt._connect(live=True)
 
 
-def _configure_jupysql():
-    try:
-        from sql import connection as sql_connection
-        try:
-            from sql.magic import SqlMagic
-        except Exception:
-            SqlMagic = None
-    except Exception:
-        return
+def connect():
+    """Register the default connection ``warehouse`` (called by the extension)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+    from sql.connection import SQLAlchemyConnection
 
+    engine = create_engine("trino://", creator=_creator, poolclass=NullPool)
+    return SQLAlchemyConnection(engine, alias=ALIAS)
+
+
+def load_ipython_extension(ip):
     os.environ.setdefault("PLOOMBER_STATS_ENABLED", "false")
-
+    ip.run_line_magic("load_ext", "sql")
+    ip.run_line_magic("config", "SqlMagic.displaylimit = 100")
+    ip.run_line_magic("config", "SqlMagic.autolimit = 10000")
     try:
-        if SqlMagic is not None:
-            try:
-                if hasattr(SqlMagic, "autopandas"):
-                    SqlMagic.autopandas = False
-            except Exception:
-                pass
-            try:
-                if hasattr(SqlMagic, "displaylimit"):
-                    SqlMagic.displaylimit = 100
-            except Exception:
-                pass
-            try:
-                if hasattr(SqlMagic, "autolimit"):
-                    SqlMagic.autolimit = 10000
-            except Exception:
-                pass
-            try:
-                if hasattr(SqlMagic, "feedback"):
-                    SqlMagic.feedback = 0
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    try:
-        engine = create_engine("trino://", creator=_creator, poolclass=NullPool)
-        try:
-            orig = getattr(sql_connection.SQLAlchemyConnection, '_get_database_information', None)
-            if orig is not None:
-                def _fake_dbinfo(self):
-                    return {"dialect": "trino", "driver": "trino", "server_version_info": None}
-                sql_connection.SQLAlchemyConnection._get_database_information = _fake_dbinfo
-                try:
-                    conn = sql_connection.SQLAlchemyConnection(engine, alias="warehouse")
-                finally:
-                    sql_connection.SQLAlchemyConnection._get_database_information = orig
-            else:
-                conn = sql_connection.SQLAlchemyConnection(engine, alias="warehouse")
-            try:
-                sql_connection.ConnectionManager.connections["warehouse"] = conn
-            except Exception:
-                pass
-            try:
-                sql_connection.ConnectionManager.current = conn
-            except Exception:
-                pass
-            return
-        except Exception:
-            pass
-        try:
-            sql_connection.ConnectionManager.set(engine, displaycon=False, alias="warehouse")
-            return
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
-_configure_jupysql()
+        connect()
+    except Exception as exc:
+        # Visible, not silent: a kernel outside the platform has no Trino to reach.
+        warnings.warn(
+            f"stardelt.sqlmagic: no default connection ({exc}). "
+            "Fix the cause, then run stardelt.sqlmagic.connect().",
+            stacklevel=2,
+        )
