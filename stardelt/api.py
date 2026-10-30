@@ -11,11 +11,25 @@ The token is sent as a bearer token. Every error answer from Nova is the envelop
 one sentence plus the HTTP status. A token never appears in a message or a repr.
 """
 
+import functools
+import json
 import os
+from importlib import resources
+from urllib.parse import quote
 
 import requests
 
 DEFAULT_TIMEOUT = 60
+
+
+@functools.lru_cache(maxsize=1)
+def operations():
+    """The public operations of Nova's contract: ``operationId`` to method, path and parameters.
+
+    Read from ``operations.json``, which ``scripts/sync_contract.py`` refreshes from the contract.
+    """
+    text = resources.files("stardelt").joinpath("operations.json").read_text()
+    return json.loads(text)["operations"]
 
 
 class StardeltApiError(RuntimeError):
@@ -92,3 +106,31 @@ class Client:
     def query(self, sql):
         """``POST /api/query``: run one statement as the caller. Rows beyond Nova's cap are cut and ``truncated`` is true."""
         return QueryResult(self._request("POST", "/api/query", json={"sql": sql}).json())
+
+    def call(self, operation_id, path=None, query=None, body=None):
+        """Any public operation by its ``operationId`` (see ``operations()``).
+
+        ``path`` fills the ``{name}`` parts of the URL (each value is URL-quoted), ``query`` is
+        the query string, ``body`` a JSON-able request body. Returns the decoded JSON answer,
+        or ``None`` for an empty (204) one.
+        """
+        op = operations().get(operation_id)
+        if op is None:
+            raise ValueError(f"unknown operation {operation_id!r}; stardelt.api.operations() lists them")
+        path = dict(path or {})
+        missing = [n for n in op["path_params"] if n not in path]
+        extra = [n for n in path if n not in op["path_params"]]
+        if missing or extra:
+            raise ValueError(
+                f"{operation_id} takes path parameters {op['path_params']}: missing {missing}, unexpected {extra}"
+            )
+        url_path = op["path"]
+        for name, value in path.items():
+            url_path = url_path.replace("{" + name + "}", quote(str(value), safe=""))
+        kwargs = {}
+        if query:
+            kwargs["params"] = query
+        if body is not None:
+            kwargs["json"] = body
+        response = self._request(op["method"], url_path, **kwargs)
+        return None if response.status_code == 204 else response.json()

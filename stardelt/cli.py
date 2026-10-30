@@ -44,7 +44,29 @@ def _parser():
     sql.add_argument(
         "--max-rows", type=int, default=0, help="print at most N rows (0: all Nova returned)"
     )
+    call = commands.add_parser("api", help="call any public operation by its operationId")
+    call.add_argument("operation", nargs="?", help="an operationId (see --list)")
+    call.add_argument("--list", action="store_true", dest="list_operations", help="list the operations")
+    call.add_argument("-p", "--path", action="append", default=[], metavar="NAME=VALUE")
+    call.add_argument("-q", "--query", action="append", default=[], metavar="NAME=VALUE")
+    call.add_argument("--body", help="the request body, as JSON")
     return parser
+
+
+def _pairs(items):
+    pairs = {}
+    for item in items:
+        name, found, value = item.partition("=")
+        if not found or not name:
+            raise ValueError(f"{item!r} is not NAME=VALUE")
+        pairs[name] = value
+    return pairs
+
+
+def _list_operations():
+    ops = api.operations()
+    width = max(len(i) for i in ops)
+    return "".join(f"{i.ljust(width)}  {o['method']:<6} {o['path']}\n" for i, o in sorted(ops.items()))
 
 
 def _table(columns, rows):
@@ -81,6 +103,13 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
     except SystemExit as exit_:  # --help prints itself and exits 0
         return exit_.code if isinstance(exit_.code, int) else OK
 
+    if args.command == "api" and args.list_operations:
+        stdout.write(_list_operations())
+        return OK
+    if args.command == "api" and not args.operation:
+        stderr.write("stardelt: api needs an operationId (or --list)\n")
+        return USAGE
+
     host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
     if not host:
         stderr.write("stardelt: no host: pass --host or set STARDELT_NOVA_URL\n")
@@ -95,6 +124,16 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
         if args.command == "whoami":
             stdout.write(json.dumps(nova.me(), indent=2, ensure_ascii=False) + "\n")
             return OK
+        if args.command == "api":
+            answer = nova.call(
+                args.operation,
+                path=_pairs(args.path),
+                query=_pairs(args.query),
+                body=json.loads(args.body) if args.body is not None else None,
+            )
+            if answer is not None:
+                stdout.write(json.dumps(answer, indent=2, ensure_ascii=False) + "\n")
+            return OK
         result = nova.query(args.statement)
         stdout.write(_render(result, args.format, args.max_rows))
         if result.truncated:
@@ -106,6 +145,12 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
             return AUTH
         stderr.write(f"stardelt: {err}\n")
         return ERROR
+    except requests.exceptions.JSONDecodeError:
+        stderr.write("stardelt: Nova's answer is not JSON\n")
+        return ERROR
     except requests.RequestException:
         stderr.write(f"stardelt: cannot reach {host}\n")
         return ERROR
+    except ValueError as err:  # an unknown operation, a bad NAME=VALUE or a body that is not JSON
+        stderr.write(f"stardelt: {err}\n")
+        return USAGE
