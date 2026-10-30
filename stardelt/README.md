@@ -173,3 +173,20 @@ stardelt sql "select * from warehouse.demo.trips" --max-rows 20
 
 Results go to stdout, messages to stderr. Exit codes: `0` ok, `1` error, `2` wrong usage,
 `3` authentication needed. A token is never printed.
+
+Every `public` operation of Nova's contract is reachable by its `operationId`, in the command
+line and in Python (the list is `stardelt/operations.json`, refreshed from the contract by
+`python scripts/sync_contract.py`):
+
+```bash
+stardelt api --list                                   # operationId, method, path
+stardelt api pipelines_get -p namespace=etl -p name=nyc_taxi
+stardelt api query_log_list -q scope=mine -q state=FAILED -q limit=20
+stardelt api saved_queries_create --body '{"title": "t", "sql": "select 1"}'
+```
+
+```python
+nova = stardelt.api.Client()
+nova.call("table_history", path={"ns": "demo", "tbl": "trips"})
+nova.call("pipelines_run_trigger", path={"namespace": "etl", "name": "nyc_taxi"})
+```

@@ -1,0 +1,12 @@
+{
+  "info": {"version": "9.9.9"},
+  "paths": {
+    "/api/things/{id}": {
+      "get": {"operationId": "things_get", "tags": ["public"],
+              "parameters": [{"name": "id", "in": "path"}, {"name": "verbose", "in": "query"}]},
+      "put": {"operationId": "things_update", "tags": ["public"],
+              "parameters": [{"name": "id", "in": "path"}], "requestBody": {}}
+    },
+    "/api/internal": {"get": {"operationId": "internal_get", "tags": ["internal"]}}
+  }
+}
