@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from stardelt import api
+from stardelt import api, mcp
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -53,6 +53,13 @@ def _parser():
     call.add_argument(
         "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
     )
+    server = commands.add_parser("mcp", help="a local MCP server over the public API")
+    server_commands = server.add_subparsers(dest="mcp_command", required=True)
+    serve = server_commands.add_parser("serve", help="serve the read-only tools on stdio, for an MCP client")
+    serve.add_argument(
+        "--allow", action="append", default=[], metavar="OPERATION_ID", help="also offer this operation (e.g. query_run)"
+    )
+    server_commands.add_parser("config", help="print how to register the server in an MCP client")
     return parser
 
 
@@ -122,10 +129,11 @@ def _render(result, fmt, max_rows):
     return _table(columns, rows)
 
 
-def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
+def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=None):
     environ = os.environ if environ is None else environ
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
+    stdin = sys.stdin if stdin is None else stdin
     try:
         args = _parser().parse_args(argv)
     except _UsageError as err:
@@ -141,6 +149,10 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
         stderr.write("stardelt: api needs an operationId (or --list)\n")
         return USAGE
 
+    if args.command == "mcp" and args.mcp_command == "config":
+        stdout.write(mcp.config_text((args.host or environ.get("STARDELT_NOVA_URL", "")).strip()))
+        return OK
+
     host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
     if not host:
         stderr.write("stardelt: no host: pass --host or set STARDELT_NOVA_URL\n")
@@ -154,6 +166,11 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
     try:
         if args.command == "whoami":
             stdout.write(json.dumps(nova.me(), indent=2, ensure_ascii=False) + "\n")
+            return OK
+        if args.command == "mcp":
+            allowed = list(mcp.DEFAULT_TOOLS) + [n for n in args.allow if n not in mcp.DEFAULT_TOOLS]
+            log = lambda name, failed: stderr.write(f"stardelt-mcp: {name} {'error' if failed else 'ok'}\n")  # noqa: E731
+            mcp.serve(mcp.Server(nova, allowed, log=log), stdin, stdout)
             return OK
         if args.command == "api":
             answer = nova.call(
