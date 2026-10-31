@@ -1,12 +1,14 @@
 """``stardelt apply -f pipeline.json``: create the pipeline, or update it when one of that name exists.
 
-The file is a JSON object shaped like the body of ``POST /api/pipelines`` (operation ``pipelines_create``):
+The file is a JSON or YAML object shaped like the body of ``POST /api/pipelines`` (operation ``pipelines_create``):
 ``name`` and ``ownerGroup``, one of ``sql`` or ``notebook``, and optionally ``schedule``, ``params`` and
 ``options``. Applying the same file twice changes nothing the second time. An update replaces what the file
 says: ``params`` and ``options`` left out of the file go back to their defaults.
 """
 
 import json
+
+import yaml
 
 CREATE_ONLY = ("name", "ownerGroup")
 
@@ -16,13 +18,20 @@ class ApplyError(ValueError):
 
 
 def load(text):
-    """The pipeline spec in ``text``, or an ``ApplyError``."""
+    """The pipeline spec in ``text`` (JSON, else YAML), or an ``ApplyError``."""
     try:
         spec = json.loads(text)
     except ValueError:
-        raise ApplyError("the file is not JSON") from None
+        try:
+            spec = yaml.safe_load(text)
+        except yaml.YAMLError:
+            raise ApplyError("the file is neither JSON nor YAML") from None
     if not isinstance(spec, dict) or not isinstance(spec.get("name"), str) or not spec["name"]:
-        raise ApplyError('the file must be one JSON object with a "name"')
+        raise ApplyError('the file must be one JSON or YAML object with a "name"')
+    try:
+        json.dumps(spec)
+    except TypeError:
+        raise ApplyError("the file holds a value JSON cannot carry (an unquoted date?): put it in quotes") from None
     return spec
 
 

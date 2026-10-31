@@ -88,6 +88,37 @@ def test_a_dash_reads_the_pipeline_from_stdin():
     assert (code, json.loads(out)["action"], session.calls[1][2]["json"]) == (0, "created", SPEC)
 
 
+YAML = """\
+name: daily
+ownerGroup: etl
+sql: select 1
+schedule:
+  cron: "0 3 * * *"
+"""
+
+
+def test_a_yaml_file_is_applied_like_the_json_one(tmp_path):
+    path = tmp_path / "pipeline.yaml"
+    path.write_text(YAML)
+    code, out, _, session = run(
+        ["apply", "-f", str(path)], FakeResponse(payload={"pipelines": []}), FakeResponse(201, {"name": "daily"})
+    )
+    assert (code, json.loads(out)["action"]) == (0, "created")
+    assert session.calls[1][2]["json"] == SPEC
+
+
+def test_a_yaml_value_json_cannot_carry_is_a_usage_error(tmp_path):
+    path = tmp_path / "pipeline.yaml"
+    path.write_text(YAML + "startAfter: 2026-10-31\n")
+    code, out, err, session = run(["apply", "-f", str(path)])
+    assert (code, out, session.calls) == (2, "", []) and "put it in quotes" in err
+
+
+def test_a_file_that_is_neither_json_nor_yaml_says_so(tmp_path):
+    code, _, err, session = run(["apply", "-f", write(tmp_path, "{oops: [")])
+    assert (code, session.calls) == (2, []) and "neither JSON nor YAML" in err
+
+
 def test_the_flag_file_is_required():
     code, _, err, session = run(["apply"])
     assert (code, session.calls) == (2, []) and "--file" in err
