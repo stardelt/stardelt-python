@@ -413,6 +413,43 @@
       "query_params": [],
       "body": false
     },
+    "statements_cancel": {
+      "method": "DELETE",
+      "path": "/api/statements/{id}",
+      "path_params": [
+        "id"
+      ],
+      "query_params": [],
+      "body": false
+    },
+    "statements_chunk_get": {
+      "method": "GET",
+      "path": "/api/statements/{id}/chunks/{n}",
+      "path_params": [
+        "id",
+        "n"
+      ],
+      "query_params": [],
+      "body": false
+    },
+    "statements_get": {
+      "method": "GET",
+      "path": "/api/statements/{id}",
+      "path_params": [
+        "id"
+      ],
+      "query_params": [
+        "waitSeconds"
+      ],
+      "body": false
+    },
+    "statements_submit": {
+      "method": "POST",
+      "path": "/api/statements",
+      "path_params": [],
+      "query_params": [],
+      "body": true
+    },
     "table_documentation_get": {
       "method": "GET",
       "path": "/api/catalog/tables/{ns}/{tbl}/documentation",
