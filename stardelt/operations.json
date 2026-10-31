@@ -163,6 +163,16 @@
       ],
       "body": false
     },
+    "notebooks_delete": {
+      "method": "DELETE",
+      "path": "/api/notebooks/{group}/{name}",
+      "path_params": [
+        "group",
+        "name"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "notebooks_list": {
       "method": "GET",
       "path": "/api/notebooks",
