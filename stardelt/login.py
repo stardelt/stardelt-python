@@ -1,13 +1,18 @@
 """``stardelt login``: sign in once with the device authorization grant (RFC 8628).
 
-The person gets an address and a short code, approves it in a browser, and the tokens are kept in
+The request carries a PKCE challenge (S256) and the polls its verifier, because the platform's public client requires
+PKCE even for this grant (found against the live realm: "Missing parameter: code_challenge_method"); a provider that
+does not ask for it ignores the extra fields. The person gets an address and a short code, approves it in a browser, and the tokens are kept in
 ``$XDG_CONFIG_HOME/stardelt/credentials.json`` (``~/.config/...`` without it; the directory is mode 0700, the
 file 0600). ``STARDELT_TOKEN`` still wins when it is set, for CI. The access token is renewed with the refresh
 token when less than a minute is left. A token is never printed.
 """
 
+import base64
+import hashlib
 import json
 import os
+import secrets
 import time
 from pathlib import Path
 
@@ -108,10 +113,22 @@ def _creds(issuer, client_id, token_endpoint, body, now, previous=None):
     }
 
 
+def pkce():
+    """A PKCE pair (RFC 7636, method S256): the verifier stays here, the challenge goes to the provider."""
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
 def device_login(session, issuer, client_id, say, sleep=time.sleep, clock=time.time):
     """Run the device flow and return the credentials dict. ``say`` receives the lines the person must read."""
     meta = discover(session, issuer)
-    status, start = _post(session, meta["device_authorization_endpoint"], {"client_id": client_id, "scope": "openid"})
+    verifier, challenge = pkce()
+    status, start = _post(
+        session,
+        meta["device_authorization_endpoint"],
+        {"client_id": client_id, "scope": "openid", "code_challenge": challenge, "code_challenge_method": "S256"},
+    )
     if status != 200 or "device_code" not in start:
         raise LoginError(f"the identity provider refused the sign-in request (HTTP {status})")
     where = start.get("verification_uri_complete") or start.get("verification_uri", "")
@@ -123,7 +140,12 @@ def device_login(session, issuer, client_id, say, sleep=time.sleep, clock=time.t
         status, body = _post(
             session,
             meta["token_endpoint"],
-            {"grant_type": GRANT_DEVICE, "device_code": start["device_code"], "client_id": client_id},
+            {
+                "grant_type": GRANT_DEVICE,
+                "device_code": start["device_code"],
+                "client_id": client_id,
+                "code_verifier": verifier,
+            },
         )
         if status == 200 and "access_token" in body:
             return _creds(issuer, client_id, meta["token_endpoint"], body, clock())

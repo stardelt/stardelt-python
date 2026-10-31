@@ -48,7 +48,37 @@ def test_the_device_flow_shows_the_code_polls_and_returns_the_tokens():
     assert slept == [0, 0, 0]
     method, url, kwargs = session.calls[-1]
     assert (method, url) == ("POST", META["token_endpoint"])
-    assert kwargs["data"] == {"grant_type": login.GRANT_DEVICE, "device_code": "dc-1", "client_id": "stardelt-dev"}
+    assert kwargs["data"] == {
+        "grant_type": login.GRANT_DEVICE,
+        "device_code": "dc-1",
+        "client_id": "stardelt-dev",
+        "code_verifier": kwargs["data"]["code_verifier"],
+    }
+
+
+def challenge_of(verifier):
+    import base64
+    import hashlib
+
+    return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+
+
+def test_the_request_carries_a_pkce_challenge_and_every_poll_the_matching_verifier():
+    session = idp(PENDING, GRANTED)
+    login.device_login(session, ISSUER, "stardelt-dev", print, sleep=lambda s: None, clock=lambda: 0)
+    start = session.calls[1][2]["data"]
+    assert start["client_id"] == "stardelt-dev" and start["code_challenge_method"] == "S256"
+    verifiers = [call[2]["data"]["code_verifier"] for call in session.calls[2:]]
+    assert len(verifiers) == 2 and len(set(verifiers)) == 1
+    assert 43 <= len(verifiers[0]) <= 128
+    assert start["code_challenge"] == challenge_of(verifiers[0])
+    assert verifiers[0] not in str(start), "the verifier never goes to the device endpoint"
+
+
+def test_each_login_makes_a_new_verifier():
+    first, second = login.pkce(), login.pkce()
+    assert first[0] != second[0] and first[1] != second[1]
+    assert first[1] == challenge_of(first[0]) and "=" not in first[1] and "+" not in first[1] and "/" not in first[1]
 
 
 def test_slow_down_makes_the_next_wait_five_seconds_longer():
