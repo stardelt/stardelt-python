@@ -152,3 +152,57 @@ def test_the_table_format_falls_back_to_json_when_the_answer_is_not_a_list_of_ob
     assert (code, json.loads(out)) == (0, {"user": "analyst"})
     code, out, _, _ = run(["api", "query_log_list", "--format", "table"], FakeResponse(payload={"items": [], "nextCursor": None}))
     assert (code, json.loads(out)) == (0, {"items": [], "nextCursor": None})
+
+
+def client(*responses):
+    session = FakeSession(*responses)
+    return api.Client(base_url="https://nova.example", token="t", session=session), session
+
+
+def test_ops_calls_an_operation_by_resource_and_verb_with_keyword_arguments():
+    nova, session = client(FakeResponse(payload={"name": "daily"}))
+    assert nova.ops.pipelines.get(namespace="etl", name="daily") == {"name": "daily"}
+    assert session.calls[0][:2] == ("GET", "https://nova.example/api/pipelines/etl/daily")
+
+
+def test_ops_sends_query_parameters_and_the_body():
+    nova, session = client(FakeResponse(payload=[]), FakeResponse(payload={}))
+    nova.ops.query.log_list(scope="mine", limit=5)
+    assert session.calls[0][2]["params"] == {"scope": "mine", "limit": 5}
+    nova.ops.saved.queries_create(body={"title": "t", "sql": "select 1"})
+    assert session.calls[1][2]["json"] == {"title": "t", "sql": "select 1"}
+
+
+def test_ops_resource_with_one_unnamed_operation_is_called_directly():
+    nova, session = client(FakeResponse(payload={"status": "ok"}))
+    assert nova.ops.health() == {"status": "ok"}
+    assert session.calls[0][:2] == ("GET", "https://nova.example/api/health")
+
+
+def test_ops_names_what_is_accepted_when_an_argument_is_wrong():
+    nova, session = client()
+    with pytest.raises(TypeError, match=r"pipelines_get takes \['namespace', 'name'\], not \['nmae'\]"):
+        nova.ops.pipelines.get(namespace="etl", nmae="daily")
+    with pytest.raises(ValueError, match="missing"):
+        nova.ops.pipelines.get(namespace="etl")
+    assert session.calls == []
+
+
+def test_ops_lists_resources_and_verbs_for_tab_completion_and_refuses_unknown_ones():
+    nova, _ = client()
+    assert {"pipelines", "table", "query", "notebooks"} <= set(dir(nova.ops))
+    assert "run_get" in dir(nova.ops.pipelines) and "" not in dir(nova.ops.pipelines)
+    with pytest.raises(AttributeError, match="no resource 'nope'"):
+        nova.ops.nope
+    with pytest.raises(AttributeError, match="has no verb 'nope'"):
+        nova.ops.pipelines.nope
+    with pytest.raises(TypeError, match="call a verb"):
+        nova.ops.pipelines()
+
+
+def test_every_operation_is_reachable_through_ops():
+    nova, _ = client()
+    for operation_id in api.operations():
+        resource, _, verb = operation_id.partition("_")
+        target = getattr(nova.ops, resource)
+        assert verb == "" or callable(getattr(target, verb)), operation_id
