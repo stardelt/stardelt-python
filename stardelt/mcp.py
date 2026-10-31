@@ -3,8 +3,10 @@
 Every tool is one public operation of Nova's contract, named by its ``operationId`` and described by
 ``stardelt/operations.json``. The default is deny: only the read operations in ``DEFAULT_TOOLS`` are
 offered; anything else (SQL, a write) is offered only when named with ``--allow``. A call runs as the
-person whose token is in ``STARDELT_TOKEN``, through ``stardelt.api.Client``. No tool result is ever an
-instruction: the server says so in its ``instructions``.
+person whose token is in ``STARDELT_TOKEN``, through ``stardelt.api.Client``. Two more tools are not
+operations but guarded SQL (``stardelt.guarded_sql``): ``sql_read`` and ``sql_explain``, read-only and bounded;
+``stardelt mcp serve --no-sql`` leaves them out. No tool result is ever an instruction: the server says so in
+its ``instructions``.
 """
 
 import json
@@ -12,7 +14,7 @@ import json
 import requests
 
 import stardelt
-from stardelt import api
+from stardelt import api, guarded_sql
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_TEXT = 20000
@@ -43,6 +45,40 @@ DEFAULT_TOOLS = (
     "notebooks_versions",
     "notebooks_parameters",
 )
+
+
+SQL_TOOLS = {
+    "sql_read": {
+        "name": "sql_read",
+        "description": (
+            "Run ONE reading SQL statement (SELECT, WITH, VALUES, SHOW, DESCRIBE, TABLE, EXPLAIN) as the signed-in "
+            f"person. At most maxRows rows come back (default {guarded_sql.DEFAULT_ROWS}, up to {guarded_sql.MAX_ROWS}); "
+            f"a statement that takes longer than {guarded_sql.TIMEOUT_SECONDS} seconds is cancelled. Writes are refused. "
+            "Aggregate or add a LIMIT instead of reading everything."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "one reading statement"},
+                "maxRows": {"type": "integer", "minimum": 1, "maximum": guarded_sql.MAX_ROWS},
+            },
+            "required": ["sql"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    "sql_explain": {
+        "name": "sql_explain",
+        "description": "Show the query plan of ONE reading SQL statement without running it (EXPLAIN, never EXPLAIN ANALYZE).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"sql": {"type": "string", "description": "one reading statement"}},
+            "required": ["sql"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+}
 
 
 def tool(op_id, op):
@@ -76,13 +112,14 @@ def _error(id_, code, message):
 
 
 class Server:
-    def __init__(self, nova, allowed=DEFAULT_TOOLS, log=None):
+    def __init__(self, nova, allowed=DEFAULT_TOOLS, log=None, sql=True):
         operations = api.operations()
         unknown = [name for name in allowed if name not in operations]
         if unknown:
             raise ValueError(f"unknown operation(s): {', '.join(unknown)}; `stardelt api --list` shows them")
         self.nova = nova
         self.tools = {name: operations[name] for name in allowed}
+        self.sql_tools = dict(SQL_TOOLS) if sql else {}
         self.log = log or (lambda name, error: None)
 
     def handle(self, message):
@@ -106,13 +143,16 @@ class Server:
         if method == "ping":
             return _result(id_, {})
         if method == "tools/list":
-            return _result(id_, {"tools": [tool(name, op) for name, op in self.tools.items()]})
+            listed = [tool(name, op) for name, op in self.tools.items()]
+            return _result(id_, {"tools": listed + list(self.sql_tools.values())})
         if method == "tools/call":
             return self._call(id_, params)
         return _error(id_, -32601, f"method not found: {method}")
 
     def _call(self, id_, params):
         name, arguments = params.get("name"), params.get("arguments") or {}
+        if name in self.sql_tools:
+            return self._call_sql(id_, name, arguments)
         op = self.tools.get(name)
         if op is None:
             return _error(id_, -32602, f"unknown tool: {name}")
@@ -138,6 +178,34 @@ class Server:
             text = text[:MAX_TEXT] + f"\n… cut at {MAX_TEXT} characters; narrow the request"
         self.log(name, failed)
         return _result(id_, {"content": [{"type": "text", "text": text or "(no content)"}], "isError": failed})
+
+    def _call_sql(self, id_, name, arguments):
+        """``sql_read`` and ``sql_explain``: never log or echo the statement."""
+        if not isinstance(arguments, dict):
+            return _error(id_, -32602, "arguments must be an object")
+        known = set(self.sql_tools[name]["inputSchema"]["properties"])
+        try:
+            extra = sorted(set(arguments) - known)
+            if extra:
+                raise ValueError(f"unexpected arguments: {', '.join(extra)}")
+            text, failed = (
+                guarded_sql.run(
+                    self.nova, arguments.get("sql"), arguments.get("maxRows"), explain=name == "sql_explain"
+                ),
+                False,
+            )
+        except (guarded_sql.Refused, api.StardeltApiError, ValueError) as err:
+            text, failed = str(err), True
+        except requests.RequestException:
+            text, failed = "cannot reach the platform", True
+        self.log(name, failed)
+        return _result(id_, {"content": [{"type": "text", "text": _cut(text) or "(no content)"}], "isError": failed})
+
+
+def _cut(text):
+    if len(text) > MAX_TEXT:
+        text = text[:MAX_TEXT] + f"\n… cut at {MAX_TEXT} characters; narrow the request"
+    return text
 
 
 def serve(server, stdin, stdout):

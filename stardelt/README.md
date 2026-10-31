@@ -261,7 +261,13 @@ schedule:
 
 `stardelt mcp serve` is a local MCP server (stdio) over the same contract: each tool is one public
 operation, named by its `operationId`. Only read operations are offered by default; `--allow
-query_run` adds one more (SQL, or any write you name) on purpose. It runs as the person whose token
+query_run` adds one more (SQL, or any write you name) on purpose. Two more tools are guarded SQL, not
+operations: `sql_read` runs ONE reading statement (`SELECT`, `WITH`, `VALUES`, `SHOW`, `DESCRIBE`, `TABLE`,
+`EXPLAIN`; a write, a second statement or `EXPLAIN ANALYZE` is refused before anything is sent) and returns at
+most `maxRows` rows (default 200, up to 1000) with a hint when more exist; a statement that takes longer than
+60 seconds is cancelled in the engine. `sql_explain` shows the plan without running it. Both go through the
+statement API, so they need a Nova that has it, and `--no-sql` leaves them out. The statement check is only a
+first filter: the engine's own permissions for the signed-in person stay the control. It runs as the person whose token
 is in `STARDELT_TOKEN`, and what it returns is data, never instructions. `stardelt mcp config` prints
 the line that registers it in Claude Code and the `.mcp.json` snippet (the token stays a placeholder):
 
