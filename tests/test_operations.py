@@ -117,6 +117,37 @@ def test_stardelt_api_sends_a_json_body_and_is_silent_on_204():
     assert session.calls[0][2]["json"] == {"title": "t", "sql": "select 1"}
 
 
+def test_body_at_a_file_sends_the_json_in_the_file(tmp_path):
+    notebook = tmp_path / "trips.ipynb"
+    notebook.write_text('{"cells": [], "nbformat": 4}', encoding="utf-8")
+    code, out, err, session = run(
+        ["notebooks", "publish", "analytics", "trips.ipynb", "--body", f"@{notebook}"],
+        FakeResponse(payload={"name": "trips.ipynb"}),
+    )
+    assert (code, err) == (0, "")
+    method, url, kwargs = session.calls[0]
+    assert (method, url) == ("PUT", "https://nova.example/api/notebooks/analytics/trips.ipynb")
+    assert kwargs["json"] == {"cells": [], "nbformat": 4}
+
+
+def test_body_at_a_dash_reads_standard_input():
+    out, err = io.StringIO(), io.StringIO()
+    session = FakeSession(FakeResponse(status=204))
+    code = cli.main(
+        ["api", "saved_queries_create", "--body", "@-"],
+        environ=ENV, stdout=out, stderr=err, session=session, stdin=io.StringIO('{"title": "t", "sql": "select 1"}'),
+    )
+    assert code == 0 and session.calls[0][2]["json"] == {"title": "t", "sql": "select 1"}
+
+
+def test_body_file_problems_exit_2_before_any_request(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    for value, said in ((f"@{tmp_path / 'missing.json'}", "missing.json"), (f"@{bad}", "the body is not JSON")):
+        code, out, err, session = run(["api", "query_run", "--body", value])
+        assert (code, out, session.calls) == (2, "", []) and said in err, value
+
+
 def test_stardelt_api_usage_mistakes_exit_2_before_any_request():
     for argv in (
         ["api"],

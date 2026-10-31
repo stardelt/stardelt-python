@@ -76,7 +76,7 @@ def _parser():
     call.add_argument("--list", action="store_true", dest="list_operations", help="list the operations")
     call.add_argument("-p", "--path", action="append", default=[], metavar="NAME=VALUE")
     call.add_argument("-q", "--query", action="append", default=[], metavar="NAME=VALUE")
-    call.add_argument("--body", help="the request body, as JSON")
+    call.add_argument("--body", help="the request body, as JSON; @FILE reads it from a file, @- from standard input")
     call.add_argument(
         "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
     )
@@ -235,6 +235,20 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         stderr.write("stardelt: signed out\n" if login.forget(environ) else "stardelt: there was no stored sign-in\n")
         return OK
 
+    body = None
+    if args.command == "api" and args.body is not None:
+        try:
+            raw = args.body
+            if args.body.startswith("@"):
+                raw = stdin.read() if args.body == "@-" else Path(args.body[1:]).read_text(encoding="utf-8")
+            body = json.loads(raw)
+        except OSError as err:
+            stderr.write(f"stardelt: {err}\n")
+            return USAGE
+        except ValueError as err:
+            stderr.write(f"stardelt: the body is not JSON: {err}\n")
+            return USAGE
+
     specs = None
     if args.command == "apply":
         try:
@@ -300,7 +314,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
                 args.operation,
                 path=_pairs(args.path),
                 query=_pairs(args.query),
-                body=json.loads(args.body) if args.body is not None else None,
+                body=body,
             )
             rows = _rows_of(answer) if args.format == "table" else None
             if rows is not None:
