@@ -1,7 +1,7 @@
 """``stardelt``: a thin command-line client for Nova's public API (shells, CI, agents).
 
     export STARDELT_NOVA_URL=https://nova.example.com
-    export STARDELT_TOKEN=...             # a bearer token; `stardelt login` comes later
+    stardelt login --issuer https://id.example.com/realms/stardelt   # once; or: export STARDELT_TOKEN=... (CI)
     stardelt whoami
     stardelt sql "select 1 as x" --format json
 
@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from stardelt import api, mcp, shortcuts
+from stardelt import api, login, mcp, shortcuts
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -44,6 +44,10 @@ def _parser():
     parser.add_argument("--host", help="Nova's base URL (default: $STARDELT_NOVA_URL)")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="who Nova thinks you are (JSON)")
+    signin = commands.add_parser("login", help="sign in once with a code approved in a browser (device flow)")
+    signin.add_argument("--issuer", help="your identity provider's realm address (default: $STARDELT_ISSUER)")
+    signin.add_argument("--client-id", help=f"the public client to sign in with (default: {login.DEFAULT_CLIENT_ID})")
+    commands.add_parser("logout", help="forget the stored sign-in")
     sql = commands.add_parser("sql", help="run one statement as you")
     sql.add_argument("statement")
     sql.add_argument("--format", choices=["table", "json", "csv"], default="table")
@@ -135,6 +139,29 @@ def _render(result, fmt, max_rows):
     return _table(columns, rows)
 
 
+def _login(args, environ, stderr, session):
+    issuer = (args.issuer or environ.get("STARDELT_ISSUER", "")).strip()
+    if not issuer:
+        stderr.write("stardelt: login needs --issuer (or STARDELT_ISSUER): your identity provider's realm address\n")
+        return USAGE
+    client_id = args.client_id or environ.get("STARDELT_CLIENT_ID", "") or login.DEFAULT_CLIENT_ID
+    try:
+        say = lambda line: stderr.write(f"stardelt: {line}\n")  # noqa: E731
+        creds = login.device_login(session or requests.Session(), issuer, client_id, say)
+        host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
+        if host:
+            creds["host"] = host
+        path = login.save(environ, creds)
+    except login.LoginError as err:
+        stderr.write(f"stardelt: {err}\n")
+        return AUTH
+    except requests.RequestException:
+        stderr.write(f"stardelt: cannot reach {issuer}\n")
+        return ERROR
+    stderr.write(f"stardelt: signed in; the sign-in is kept in {path}\n")
+    return OK
+
+
 def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=None):
     environ = os.environ if environ is None else environ
     stdout = sys.stdout if stdout is None else stdout
@@ -159,15 +186,25 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         stdout.write(mcp.config_text((args.host or environ.get("STARDELT_NOVA_URL", "")).strip()))
         return OK
 
-    host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
+    if args.command == "login":
+        return _login(args, environ, stderr, session)
+    if args.command == "logout":
+        stderr.write("stardelt: signed out\n" if login.forget(environ) else "stardelt: there was no stored sign-in\n")
+        return OK
+
+    stored = login.load(environ)
+    host = (args.host or environ.get("STARDELT_NOVA_URL", "") or (stored or {}).get("host") or "").strip()
     if not host:
         stderr.write("stardelt: no host: pass --host or set STARDELT_NOVA_URL\n")
         return USAGE
+    http = session or requests.Session()
     token = environ.get("STARDELT_TOKEN", "").strip()
     if not token:
-        stderr.write("stardelt: authentication needed: set STARDELT_TOKEN to a bearer token\n")
-        return AUTH
-    nova = api.Client(base_url=host, token=token, session=session)
+        if stored is None:
+            stderr.write("stardelt: authentication needed: run `stardelt login` or set STARDELT_TOKEN\n")
+            return AUTH
+        token = lambda: login.fresh_token(environ, http)  # noqa: E731
+    nova = api.Client(base_url=host, token=token, session=http)
 
     try:
         if args.command == "whoami":
@@ -196,6 +233,9 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if result.truncated:
             stderr.write(f"stardelt: Nova cut the result at {len(result.rows)} rows\n")
         return OK
+    except login.LoginError as err:
+        stderr.write(f"stardelt: {err}\n")
+        return AUTH
     except api.StardeltApiError as err:
         if err.status == 401:
             stderr.write(f"stardelt: authentication needed: {err}\n")
