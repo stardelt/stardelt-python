@@ -7,10 +7,12 @@ says: ``params`` and ``options`` left out of the file go back to their defaults.
 """
 
 import json
+from pathlib import Path
 
 import yaml
 
 CREATE_ONLY = ("name", "ownerGroup")
+SUFFIXES = (".json", ".yaml", ".yml")
 
 
 class ApplyError(ValueError):
@@ -33,6 +35,28 @@ def load(text):
     except TypeError:
         raise ApplyError("the file holds a value JSON cannot carry (an unquoted date?): put it in quotes") from None
     return spec
+
+
+def load_path(path):
+    """The specs at ``path``: one file, or every ``.json``, ``.yaml`` and ``.yml`` file directly inside a
+    directory, in name order. Every file is read before anything is applied, so one bad file writes nothing."""
+    where = Path(path)
+    if not where.is_dir():
+        return [load(where.read_text(encoding="utf-8"))]
+    files = sorted(f for f in where.iterdir() if f.is_file() and f.suffix in SUFFIXES)
+    if not files:
+        raise ApplyError(f"{path} holds no .json, .yaml or .yml file")
+    specs = []
+    for f in files:
+        try:
+            specs.append(load(f.read_text(encoding="utf-8")))
+        except ApplyError as err:
+            raise ApplyError(f"{f.name}: {err}") from None
+    names = [spec["name"] for spec in specs]
+    for name in names:
+        if names.count(name) > 1:
+            raise ApplyError(f"two files define the pipeline {name}")
+    return specs
 
 
 def apply(nova, spec, dry_run=False):

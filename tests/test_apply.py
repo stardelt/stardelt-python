@@ -81,6 +81,48 @@ def test_a_file_that_is_not_a_pipeline_is_a_usage_error_without_a_request(tmp_pa
     assert (code, session.calls) == (2, []) and "missing.json" in err
 
 
+def put(folder, name, spec):
+    (folder / name).write_text(spec if isinstance(spec, str) else json.dumps(spec))
+
+
+def test_a_directory_applies_its_pipeline_files_in_name_order(tmp_path):
+    put(tmp_path, "c.yml", "name: gamma\nownerGroup: etl\nsql: select 3\n")
+    put(tmp_path, "b.yaml", "name: beta\nownerGroup: etl\nsql: select 2\n")
+    put(tmp_path, "a.json", dict(SPEC, name="alpha"))
+    put(tmp_path, "notes.txt", "not a pipeline")
+    empty = FakeResponse(payload={"pipelines": []})
+    code, out, err, session = run(
+        ["apply", "-f", str(tmp_path)], empty, FakeResponse(201, {}), empty, FakeResponse(201, {}), empty, FakeResponse(201, {})
+    )
+    assert code == 0 and err == ""
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "created", "name": "alpha"},
+        {"action": "created", "name": "beta"},
+        {"action": "created", "name": "gamma"},
+    ]
+    assert [c[2]["json"]["name"] for c in session.calls if c[0] == "POST"] == ["alpha", "beta", "gamma"]
+
+
+def test_a_directory_without_pipeline_files_is_a_usage_error(tmp_path):
+    put(tmp_path, "notes.txt", "not a pipeline")
+    code, out, err, session = run(["apply", "-f", str(tmp_path)])
+    assert (code, out, session.calls) == (2, "", []) and "holds no .json, .yaml or .yml file" in err
+
+
+def test_two_files_with_one_pipeline_name_write_nothing(tmp_path):
+    put(tmp_path, "a.json", SPEC)
+    put(tmp_path, "b.yaml", "name: daily\nownerGroup: etl\nsql: select 2\n")
+    code, out, err, session = run(["apply", "-f", str(tmp_path)])
+    assert (code, out, session.calls) == (2, "", []) and "two files define the pipeline daily" in err
+
+
+def test_a_bad_file_in_the_directory_is_named_and_nothing_is_written(tmp_path):
+    put(tmp_path, "a.json", SPEC)
+    put(tmp_path, "b.json", "{oops")
+    code, out, err, session = run(["apply", "-f", str(tmp_path)])
+    assert (code, out, session.calls) == (2, "", []) and err.startswith("stardelt: b.json: ")
+
+
 def test_a_dash_reads_the_pipeline_from_stdin():
     code, out, _, session = run(
         ["apply", "-f", "-"], FakeResponse(payload={"pipelines": []}), FakeResponse(201, {}), stdin=json.dumps(SPEC)
