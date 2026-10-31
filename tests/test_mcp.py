@@ -58,7 +58,7 @@ def test_the_default_tools_are_read_only_and_exist_in_the_contract():
         assert name in operations and operations[name]["method"] == "GET", name
     srv, _ = server()
     tools = {t["name"]: t for t in srv.handle(rpc("tools/list"))["result"]["tools"]}
-    assert set(tools) == set(mcp.DEFAULT_TOOLS)
+    assert set(tools) == set(mcp.DEFAULT_TOOLS) | {"sql_read", "sql_explain"}
     assert "query_run" not in tools
     assert all(t["annotations"]["readOnlyHint"] is True for t in tools.values())
     assert tools["pipelines_get"]["inputSchema"]["required"] == ["namespace", "name"]
@@ -148,3 +148,44 @@ def test_config_prints_the_registration_with_a_placeholder_token():
     assert "claude mcp add --transport stdio" in out and "https://nova.example" in out
     snippet = json.loads(out.split(".mcp.json:\n", 1)[1])
     assert snippet["mcpServers"]["stardelt"]["args"] == ["mcp", "serve"]
+
+
+def test_the_guarded_sql_tools_are_offered_read_only_and_no_sql_leaves_them_out():
+    srv, _ = server()
+    tools = {t["name"]: t for t in srv.handle(rpc("tools/list"))["result"]["tools"]}
+    assert tools["sql_read"]["annotations"]["readOnlyHint"] is True
+    assert tools["sql_read"]["inputSchema"]["required"] == ["sql"]
+    assert set(tools["sql_read"]["inputSchema"]["properties"]) == {"sql", "maxRows"}
+    assert set(tools["sql_explain"]["inputSchema"]["properties"]) == {"sql"}
+    plain = mcp.Server(api.Client(base_url="https://n", token=CANARY, session=FakeSession()), sql=False)
+    assert "sql_read" not in {t["name"] for t in plain.handle(rpc("tools/list"))["result"]["tools"]}
+    assert plain.handle(rpc("tools/call", {"name": "sql_read", "arguments": {"sql": "select 1"}}))["error"]["code"] == -32602
+
+
+def test_sql_read_runs_a_reading_statement_and_a_write_is_a_tool_error_with_no_request():
+    view = {"statementId": "q1", "state": "SUCCEEDED", "columns": [], "rows": [[1]], "rowCount": 1, "truncated": False}
+    srv, session = server(FakeResponse(200, view), FakeResponse(204, None))
+    reply = call(srv, "sql_read", {"sql": "select 1"})
+    assert reply["result"]["isError"] is False and json.loads(text_of(reply))["rows"] == [[1]]
+    srv, session = server()
+    reply = call(srv, "sql_read", {"sql": "drop table t"})
+    assert reply["result"]["isError"] is True and "not DROP" in text_of(reply)
+    reply = call(srv, "sql_explain", {"sql": "select 1", "maxRows": 5})
+    assert reply["result"]["isError"] is True and "unexpected arguments: maxRows" in text_of(reply)
+    assert session.calls == []
+
+
+def test_the_log_line_of_a_sql_call_never_holds_the_statement():
+    logged = []
+    session = FakeSession()
+    srv = mcp.Server(api.Client(base_url="https://n", token=CANARY, session=session), log=lambda n, e: logged.append((n, e)))
+    srv.handle(rpc("tools/call", {"name": "sql_read", "arguments": {"sql": "drop table secret_table"}}))
+    assert logged == [("sql_read", True)]
+
+
+def test_the_command_can_leave_the_sql_tools_out():
+    lines = json.dumps(rpc("tools/list")) + "\n"
+    code, out, _ = run_cli(["mcp", "serve"], lines)
+    assert code == 0 and "sql_read" in out
+    code, out, _ = run_cli(["mcp", "serve", "--no-sql"], lines)
+    assert code == 0 and "sql_read" not in out

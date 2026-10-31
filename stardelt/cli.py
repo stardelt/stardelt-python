@@ -76,6 +76,7 @@ def _parser():
     serve.add_argument(
         "--allow", action="append", default=[], metavar="OPERATION_ID", help="also offer this operation (e.g. query_run)"
     )
+    serve.add_argument("--no-sql", action="store_true", help="leave out the guarded SQL tools sql_read and sql_explain")
     server_commands.add_parser("config", help="print how to register the server in an MCP client")
     return parser
 
@@ -240,7 +241,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if args.command == "mcp":
             allowed = list(mcp.DEFAULT_TOOLS) + [n for n in args.allow if n not in mcp.DEFAULT_TOOLS]
             log = lambda name, failed: stderr.write(f"stardelt-mcp: {name} {'error' if failed else 'ok'}\n")  # noqa: E731
-            mcp.serve(mcp.Server(nova, allowed, log=log), stdin, stdout)
+            mcp.serve(mcp.Server(nova, allowed, log=log, sql=not args.no_sql), stdin, stdout)
             return OK
         if args.command == "api":
             answer = nova.call(
