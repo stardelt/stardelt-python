@@ -161,15 +161,21 @@ when you are in several, pass `group=`. The call prints and returns
 ## Command line
 
 `pip install stardelt` also installs a `stardelt` command, a thin client for shells, CI and
-agents over Nova's public API. It needs a Nova URL and a bearer token in the environment:
+agents over Nova's public API. It needs a Nova URL and a sign-in:
 
 ```bash
 export STARDELT_NOVA_URL=https://nova.example.com
-export STARDELT_TOKEN=...            # `stardelt login` comes later
+stardelt login --issuer https://id.example.com/realms/stardelt   # once, see below
 stardelt whoami
 stardelt sql "select 1 as x" --format json     # table (default), json or csv
 stardelt sql "select * from warehouse.demo.trips" --max-rows 20
 ```
+
+`stardelt login` signs you in with a code you approve in a browser (the device flow of the platform's
+`stardelt-dev` client; `--client-id` names another one). It stores the tokens in
+`~/.config/stardelt/credentials.json` (mode 0600; `$XDG_CONFIG_HOME` is honoured), renews the access token
+when it has less than a minute left, and remembers `--host`/`STARDELT_NOVA_URL` given at login. `STARDELT_TOKEN`
+still wins when set (CI). `stardelt logout` deletes the file.
 
 Results go to stdout, messages to stderr. Exit codes: `0` ok, `1` error, `2` wrong usage,
 `3` authentication needed. A token is never printed.
