@@ -1,6 +1,13 @@
 {
   "contract_version": "0.1.0",
   "operations": {
+    "auth_config": {
+      "method": "GET",
+      "path": "/api/auth/config",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
     "catalog_metrics_get": {
       "method": "GET",
       "path": "/api/catalog/metrics",
