@@ -27,6 +27,22 @@ one). An error answer from Nova becomes a `StardeltApiError` with Nova's one sen
 token never appears in a message or a `repr`. `query()` returns at most the rows Nova's cap allows; check
 `result.truncated`.
 
+Every public operation of the contract is also a method, grouped by resource: `nova.ops.<resource>.<verb>(...)`.
+The names are the `operationId`s split at the first underscore, the keyword arguments are the path and query
+parameters of the operation (`body=` is the JSON body), and `dir(nova.ops)` and `dir(nova.ops.pipelines)` list
+what exists, so tab completion works in a notebook:
+
+```python
+nova.ops.pipelines.list()
+nova.ops.pipelines.get(namespace="etl", name="nyc_taxi")
+nova.ops.pipelines.run_get(namespace="etl", name="nyc_taxi", run_id="r1")
+nova.ops.query.log_list(scope="mine", state="FAILED", limit=20)
+nova.ops.table.history(ns="demo", tbl="trips")
+nova.ops.health()                  # a resource with a single operation is called directly
+```
+
+A wrong argument name is a `TypeError` that lists the accepted ones, before any request is sent.
+
 ## Notebook tasks: `python -m stardelt.notebook_run`
 
 The pod a notebook task runs holds no storage credential: the DAG signs two URLs and the wrapper

@@ -60,6 +60,67 @@ class QueryResult:
         return f"QueryResult(rows={self.row_count}, truncated={self.truncated})"
 
 
+class Verbs:
+    """The verbs of one resource as methods: ``nova.ops.pipelines.get(namespace="etl", name="daily")``.
+
+    Keyword arguments are matched by name against the operation's path and query parameters (see
+    ``operations()``); ``body=`` is the JSON body. A resource with a single unnamed operation
+    (``nova.ops.health()``) is called directly.
+    """
+
+    def __init__(self, client, resource, verbs):
+        self._client = client
+        self._resource = resource
+        self._verbs = verbs
+
+    def __dir__(self):
+        return sorted(verb for verb in self._verbs if verb)
+
+    def __repr__(self):
+        return f"<{self._resource}: {', '.join(dir(self))}>"
+
+    def __getattr__(self, verb):
+        if verb.startswith("_") or verb not in self._verbs:
+            raise AttributeError(f"{self._resource} has no verb {verb!r}; it has: {', '.join(dir(self))}")
+        return functools.partial(self._call, self._verbs[verb])
+
+    def __call__(self, **arguments):
+        if "" not in self._verbs:
+            raise TypeError(f"call a verb: {self._resource}.<verb>(...); the verbs are: {', '.join(dir(self))}")
+        return self._call(self._verbs[""], **arguments)
+
+    def _call(self, operation_id, body=None, **arguments):
+        op = operations()[operation_id]
+        path = {name: arguments.pop(name) for name in op["path_params"] if name in arguments}
+        query = {name: arguments.pop(name) for name in op["query_params"] if name in arguments}
+        if arguments:
+            accepted = op["path_params"] + op["query_params"] + (["body"] if op["body"] else [])
+            raise TypeError(f"{operation_id} takes {accepted}, not {sorted(arguments)}")
+        return self._client.call(operation_id, path=path, query=query, body=body)
+
+
+class Resources:
+    """``nova.ops``: one attribute per resource of the contract (``pipelines``, ``table``, ``query``, ...)."""
+
+    def __init__(self, client):
+        self._client = client
+        self._resources = {}
+        for operation_id in operations():
+            resource, _, verb = operation_id.partition("_")
+            self._resources.setdefault(resource, {})[verb] = operation_id
+
+    def __dir__(self):
+        return sorted(self._resources)
+
+    def __repr__(self):
+        return f"<resources: {', '.join(dir(self))}>"
+
+    def __getattr__(self, resource):
+        if resource.startswith("_") or resource not in self._resources:
+            raise AttributeError(f"no resource {resource!r}; the resources are: {', '.join(dir(self))}")
+        return Verbs(self._client, resource, self._resources[resource])
+
+
 class Client:
     """Talks to one Nova. ``token`` is a string or a function returning one (called per request)."""
 
@@ -74,6 +135,11 @@ class Client:
 
     def __repr__(self):
         return f"Client(base_url={self.base_url!r})"
+
+    @property
+    def ops(self):
+        """Every public operation as ``nova.ops.<resource>.<verb>(...)``; ``dir(nova.ops)`` lists the resources."""
+        return Resources(self)
 
     def _bearer(self):
         token = self._token
