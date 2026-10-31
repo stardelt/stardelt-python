@@ -212,6 +212,7 @@ stardelt api --list                                   # operationId, method, pat
 stardelt api pipelines_get -p namespace=etl -p name=nyc_taxi
 stardelt api query_log_list -q scope=mine -q state=FAILED -q limit=20 --format table
 stardelt api saved_queries_create --body '{"title": "t", "sql": "select 1"}'
+stardelt notebooks publish analytics trips.ipynb --body @trips.ipynb      # @FILE reads the body from a file, @- from standard input
 ```
 
 ```python
