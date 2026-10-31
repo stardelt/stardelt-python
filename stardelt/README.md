@@ -187,6 +187,7 @@ stardelt whoami
 stardelt sql "select 1 as x" --format json     # table (default), json or csv
 stardelt sql "select * from warehouse.demo.trips" --max-rows 20
 stardelt sql "select * from warehouse.demo.trips" --long      # as a statement: up to 100000 rows, Ctrl-C cancels it
+stardelt sql -f report.sql --format csv                       # the statement from a file; -f - reads standard input
 stardelt run etl nyc_taxi --wait                                  # start a pipeline run and wait; exit 0 only when it succeeded
 ```
 

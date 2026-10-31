@@ -53,7 +53,8 @@ def _parser():
     signin.add_argument("--client-id", help=f"the public client to sign in with (default: {login.DEFAULT_CLIENT_ID})")
     commands.add_parser("logout", help="forget the stored sign-in")
     sql = commands.add_parser("sql", help="run one statement as you")
-    sql.add_argument("statement")
+    sql.add_argument("statement", nargs="?", help="the SQL text; or use -f")
+    sql.add_argument("-f", "--file", help="read the SQL text from this file, or from standard input when it is -")
     sql.add_argument("--format", choices=["table", "json", "csv"], default="table")
     sql.add_argument(
         "--max-rows", type=int, default=0, help="print at most N rows (0: all Nova returned)"
@@ -228,6 +229,22 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             stderr.write(f"stardelt: {err}\n")
             return USAGE
 
+    text = None
+    if args.command == "sql":
+        if (args.statement is None) == (args.file is None):
+            stderr.write("stardelt: give the statement or -f FILE, not both and not neither\n")
+            return USAGE
+        try:
+            text = args.statement
+            if args.file is not None:
+                text = stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8")
+        except OSError as err:
+            stderr.write(f"stardelt: {err}\n")
+            return USAGE
+        if not text.strip():
+            stderr.write("stardelt: the statement is empty\n")
+            return USAGE
+
     stored = login.load(environ)
     host = (args.host or environ.get("STARDELT_NOVA_URL", "") or (stored or {}).get("host") or "").strip()
     if not host:
@@ -276,7 +293,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             elif answer is not None:
                 stdout.write(json.dumps(answer, indent=2, ensure_ascii=False) + "\n")
             return OK
-        result = statements.run(nova, args.statement) if args.long else nova.query(args.statement)
+        result = statements.run(nova, text) if args.long else nova.query(text)
         stdout.write(_render(result, args.format, args.max_rows))
         if result.truncated:
             stderr.write(f"stardelt: Nova cut the result at {len(result.rows)} rows\n")
