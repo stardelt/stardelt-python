@@ -127,3 +127,28 @@ def test_stardelt_api_usage_mistakes_exit_2_before_any_request():
     ):
         code, out, err, session = run(argv)
         assert (code, out, session.calls) == (2, "", []) and err.startswith("stardelt: "), argv
+
+
+ITEMS = {"items": [{"id": "q1", "state": "FINISHED", "sql": "select 1"}, {"id": "q2", "state": "FAILED"}], "nextCursor": None}
+
+
+def test_the_table_format_prints_the_one_list_of_objects_in_an_answer():
+    code, out, _, _ = run(["api", "query_log_list", "--format", "table"], FakeResponse(payload=ITEMS))
+    assert code == 0
+    assert out == "id  state     sql\nq1  FINISHED  select 1\nq2  FAILED\n"
+
+
+def test_the_table_format_takes_a_top_level_list_and_cuts_long_and_nested_cells():
+    payload = [{"name": "a", "tags": ["x", "y"], "text": "w" * 80}]
+    code, out, _, _ = run(["api", "warehouses_list", "--format", "table"], FakeResponse(payload=payload))
+    assert code == 0
+    header, row = out.splitlines()
+    assert header.split() == ["name", "tags", "text"]
+    assert '["x", "y"]' in row and row.endswith("w" * 39 + "…")
+
+
+def test_the_table_format_falls_back_to_json_when_the_answer_is_not_a_list_of_objects():
+    code, out, _, _ = run(["api", "me", "--format", "table"], FakeResponse(payload={"user": "analyst"}))
+    assert (code, json.loads(out)) == (0, {"user": "analyst"})
+    code, out, _, _ = run(["api", "query_log_list", "--format", "table"], FakeResponse(payload={"items": [], "nextCursor": None}))
+    assert (code, json.loads(out)) == (0, {"items": [], "nextCursor": None})
