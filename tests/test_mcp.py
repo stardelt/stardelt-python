@@ -62,6 +62,7 @@ def test_the_default_tools_are_read_only_and_exist_in_the_contract():
     assert "query_run" not in tools
     assert all(t["annotations"]["readOnlyHint"] is True for t in tools.values())
     assert tools["pipelines_get"]["inputSchema"]["required"] == ["namespace", "name"]
+    assert set(tools["catalog_search"]["inputSchema"]["properties"]) == {"q", "catalog", "limit"}
     assert set(tools["query_log_list"]["inputSchema"]["properties"]) >= {"scope", "state", "limit", "cursor"}
 
 

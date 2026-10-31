@@ -30,6 +30,7 @@ DEFAULT_TOOLS = (
     "catalogs_list",
     "namespaces_list",
     "tables_list",
+    "catalog_search",
     "table_metadata",
     "table_history",
     "table_documentation_get",
