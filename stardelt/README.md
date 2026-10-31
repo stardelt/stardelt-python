@@ -226,6 +226,24 @@ stardelt pipelines get etl nyc_taxi                    # = api pipelines_get -p 
 stardelt table history demo trips --format table
 ```
 
+### Apply a pipeline from a file
+
+`stardelt apply -f pipeline.json` creates the pipeline, or updates it when one of that name exists, so
+the same file can run on every deploy. The file is one JSON object shaped like the body of
+`pipelines_create`: `name`, `ownerGroup`, `sql` (or `notebook`), and optionally `schedule`, `params` and
+`options`. `-f -` reads stdin. `--dry-run` says what would happen and writes nothing. An update replaces
+what the file says (`params` and `options` left out go back to their defaults); the group of an existing
+pipeline cannot change. The answer on stdout is `{"action": "created" | "updated" | "would-create" |
+"would-update", "name": ...}`.
+
+```bash
+cat > pipeline.json <<'JSON'
+{"name": "daily", "ownerGroup": "etl", "sql": "select 1", "schedule": {"cron": "0 3 * * *"}}
+JSON
+stardelt apply -f pipeline.json --dry-run
+stardelt apply -f pipeline.json
+```
+
 ### An MCP server for agents
 
 `stardelt mcp serve` is a local MCP server (stdio) over the same contract: each tool is one public
