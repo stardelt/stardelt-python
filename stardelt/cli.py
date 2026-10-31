@@ -50,6 +50,9 @@ def _parser():
     call.add_argument("-p", "--path", action="append", default=[], metavar="NAME=VALUE")
     call.add_argument("-q", "--query", action="append", default=[], metavar="NAME=VALUE")
     call.add_argument("--body", help="the request body, as JSON")
+    call.add_argument(
+        "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
+    )
     return parser
 
 
@@ -61,6 +64,34 @@ def _pairs(items):
             raise ValueError(f"{item!r} is not NAME=VALUE")
         pairs[name] = value
     return pairs
+
+
+def _rows_of(answer):
+    """The list of objects inside an answer: the answer itself, or its one list-of-objects field."""
+    if isinstance(answer, dict):
+        lists = [v for v in answer.values() if isinstance(v, list) and v and all(isinstance(i, dict) for i in v)]
+        answer = lists[0] if len(lists) == 1 else None
+    if isinstance(answer, list) and answer and all(isinstance(i, dict) for i in answer):
+        return answer
+    return None
+
+
+def _cell(value):
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    text = " ".join(text.split())
+    return text if len(text) <= 40 else text[:39] + "…"
+
+
+def _answer_table(rows, max_columns=8):
+    columns = []
+    for row in rows:
+        for key in row:
+            if key not in columns:
+                columns.append(key)
+    columns = columns[:max_columns]
+    return _table(columns, [[_cell(row.get(c)) for c in columns] for row in rows])
 
 
 def _list_operations():
@@ -131,7 +162,10 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None):
                 query=_pairs(args.query),
                 body=json.loads(args.body) if args.body is not None else None,
             )
-            if answer is not None:
+            rows = _rows_of(answer) if args.format == "table" else None
+            if rows is not None:
+                stdout.write(_answer_table(rows))
+            elif answer is not None:
                 stdout.write(json.dumps(answer, indent=2, ensure_ascii=False) + "\n")
             return OK
         result = nova.query(args.statement)
