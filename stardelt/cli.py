@@ -21,7 +21,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, login, mcp, shortcuts, statements
+from stardelt import api, apply, login, mcp, runs, shortcuts, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -63,6 +63,12 @@ def _parser():
         action="store_true",
         help="run it as a statement: no request stays open, up to 100000 rows, Ctrl-C cancels it in the engine",
     )
+    trigger = commands.add_parser("run", help="start a pipeline run now; --wait waits for its end")
+    trigger.add_argument("namespace")
+    trigger.add_argument("name")
+    trigger.add_argument("--wait", action="store_true", help="wait until the run ends; exit 0 only when it succeeded")
+    trigger.add_argument("--timeout", type=int, default=0, help="with --wait: give up after N seconds (0: no limit); the run is not stopped")
+    trigger.add_argument("--interval", type=int, default=5, help="with --wait: seconds between two looks (default 5)")
     call = commands.add_parser("api", help="call any public operation by its operationId")
     call.add_argument("operation", nargs="?", help="an operationId (see --list)")
     call.add_argument("--list", action="store_true", dest="list_operations", help="list the operations")
@@ -243,6 +249,15 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if args.command == "apply":
             stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
             return OK
+        if args.command == "run":
+            run, tasks = runs.start(nova, args.namespace, args.name, args.wait, args.timeout or None, args.interval)
+            stdout.write(json.dumps(dict(run, tasks=tasks) if args.wait else run, indent=2, ensure_ascii=False) + "\n")
+            if args.wait and run["state"] != "success":
+                failed = [t["taskId"] for t in tasks if t["state"] == "failed"]
+                more = f"; failed tasks: {', '.join(failed)}" if failed else ""
+                stderr.write(f"stardelt: run {run['runId']} ended {run['state']}{more}\n")
+                return ERROR
+            return OK
         if args.command == "mcp":
             allowed = list(mcp.DEFAULT_TOOLS) + [n for n in args.allow if n not in mcp.DEFAULT_TOOLS]
             log = lambda name, failed: stderr.write(f"stardelt-mcp: {name} {'error' if failed else 'ok'}\n")  # noqa: E731
@@ -269,7 +284,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
     except login.LoginError as err:
         stderr.write(f"stardelt: {err}\n")
         return AUTH
-    except statements.StatementError as err:
+    except (statements.StatementError, runs.RunError) as err:
         stderr.write(f"stardelt: {err}\n")
         return ERROR
     except KeyboardInterrupt:
