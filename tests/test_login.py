@@ -6,6 +6,7 @@ import os
 import stat
 
 import pytest
+import requests
 
 from stardelt import cli, login
 from tests.test_api import CANARY, FakeResponse, FakeSession
@@ -164,3 +165,63 @@ def test_a_stored_sign_in_that_cannot_be_renewed_exits_3(tmp_path):
     stored(tmp_path, expires_at=0, refresh_token=None)
     code, out, err = run(["whoami"], FakeSession(), {"HOME": str(tmp_path)})
     assert (code, out) == (3, "") and "stardelt login" in err
+
+
+NOVA = "https://nova.example"
+NOVA_CONFIG = {"mode": "oidc", "issuer": ISSUER, "deviceClientId": "cli-1"}
+
+
+def asking_nova(config, *token_answers):
+    return FakeSession(FakeResponse(200, config), FakeResponse(200, META), FakeResponse(200, START), *token_answers)
+
+
+def test_login_without_an_issuer_asks_nova_and_uses_the_client_it_names(tmp_path):
+    environ = {"HOME": str(tmp_path)}
+    session = asking_nova(NOVA_CONFIG, GRANTED)
+    code, out, err = run(["--host", NOVA, "login"], session, environ)
+    assert (code, out) == (0, "") and "ABCD-EFGH" in err and CANARY not in err
+    assert session.calls[0][:2] == ("GET", NOVA + "/api/auth/config")
+    assert session.calls[1][:2] == ("GET", ISSUER + "/.well-known/openid-configuration")
+    assert session.calls[2][2]["data"]["client_id"] == "cli-1"
+    kept = login.load(environ)
+    assert (kept["issuer"], kept["client_id"], kept["host"]) == (ISSUER, "cli-1", NOVA)
+
+
+def test_the_client_flag_wins_and_a_missing_client_falls_back_to_the_default(tmp_path):
+    session = asking_nova(NOVA_CONFIG, GRANTED)
+    run(["--host", NOVA, "login", "--client-id", "mine"], session, {"HOME": str(tmp_path)})
+    assert session.calls[2][2]["data"]["client_id"] == "mine"
+    session = asking_nova(dict(NOVA_CONFIG, deviceClientId=None), GRANTED)
+    run(["--host", NOVA, "login"], session, {"HOME": str(tmp_path)})
+    assert session.calls[2][2]["data"]["client_id"] == "stardelt-dev"
+
+
+def test_an_issuer_given_means_nova_is_not_asked(tmp_path):
+    session = idp(GRANTED)
+    run(["--host", NOVA, "login", "--issuer", ISSUER], session, {"HOME": str(tmp_path)})
+    assert session.calls[0][1] == ISSUER + "/.well-known/openid-configuration"
+    assert all("/api/auth/config" not in call[1] for call in session.calls)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"mode": "dev", "issuer": None, "deviceClientId": None},
+        {"mode": "dev", "issuer": ISSUER, "deviceClientId": None},
+        {"mode": "oidc", "issuer": "", "deviceClientId": "cli-1"},
+    ],
+)
+def test_a_nova_without_sign_in_is_an_authentication_error_and_nothing_is_kept(tmp_path, config):
+    environ = {"HOME": str(tmp_path)}
+    code, out, err = run(["--host", NOVA, "login"], FakeSession(FakeResponse(200, config)), environ)
+    assert (code, out) == (3, "") and "does not name an identity provider" in err
+    assert login.load(environ) is None
+
+
+def test_a_nova_that_cannot_be_reached_is_named_in_the_error(tmp_path):
+    class Down:
+        def request(self, method, url, **kwargs):
+            raise requests.ConnectionError("down")
+
+    code, _, err = run(["--host", NOVA, "login"], Down(), {"HOME": str(tmp_path)})
+    assert code == 1 and f"cannot reach {NOVA}" in err

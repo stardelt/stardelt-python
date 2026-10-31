@@ -1,7 +1,7 @@
 """``stardelt``: a thin command-line client for Nova's public API (shells, CI, agents).
 
     export STARDELT_NOVA_URL=https://nova.example.com
-    stardelt login --issuer https://id.example.com/realms/stardelt   # once; or: export STARDELT_TOKEN=... (CI)
+    stardelt login                                                   # once; asks Nova which identity provider; or: export STARDELT_TOKEN=... (CI)
     stardelt whoami
     stardelt sql "select 1 as x" --format json
     stardelt apply -f pipeline.json            # create or update a pipeline; --dry-run writes nothing
@@ -47,7 +47,9 @@ def _parser():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="who Nova thinks you are (JSON)")
     signin = commands.add_parser("login", help="sign in once with a code approved in a browser (device flow)")
-    signin.add_argument("--issuer", help="your identity provider's realm address (default: $STARDELT_ISSUER)")
+    signin.add_argument(
+        "--issuer", help="your identity provider's realm address (default: $STARDELT_ISSUER, else asked from Nova's address)"
+    )
     signin.add_argument("--client-id", help=f"the public client to sign in with (default: {login.DEFAULT_CLIENT_ID})")
     commands.add_parser("logout", help="forget the stored sign-in")
     sql = commands.add_parser("sql", help="run one statement as you")
@@ -145,15 +147,24 @@ def _render(result, fmt, max_rows):
 
 
 def _login(args, environ, stderr, session):
+    http = session or requests.Session()
+    host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
     issuer = (args.issuer or environ.get("STARDELT_ISSUER", "")).strip()
-    if not issuer:
-        stderr.write("stardelt: login needs --issuer (or STARDELT_ISSUER): your identity provider's realm address\n")
+    client_id = args.client_id or environ.get("STARDELT_CLIENT_ID", "")
+    if not issuer and not host:
+        stderr.write(
+            "stardelt: login needs --issuer (or STARDELT_ISSUER), or Nova's address (--host or STARDELT_NOVA_URL) "
+            "to ask it for the identity provider\n"
+        )
         return USAGE
-    client_id = args.client_id or environ.get("STARDELT_CLIENT_ID", "") or login.DEFAULT_CLIENT_ID
+    reaching = host
     try:
+        if not issuer:
+            issuer, advertised = login.nova_sign_in(http, host)
+            client_id = client_id or advertised or ""
+        reaching = issuer
         say = lambda line: stderr.write(f"stardelt: {line}\n")  # noqa: E731
-        creds = login.device_login(session or requests.Session(), issuer, client_id, say)
-        host = (args.host or environ.get("STARDELT_NOVA_URL", "")).strip()
+        creds = login.device_login(http, issuer, client_id or login.DEFAULT_CLIENT_ID, say)
         if host:
             creds["host"] = host
         path = login.save(environ, creds)
@@ -161,7 +172,7 @@ def _login(args, environ, stderr, session):
         stderr.write(f"stardelt: {err}\n")
         return AUTH
     except requests.RequestException:
-        stderr.write(f"stardelt: cannot reach {issuer}\n")
+        stderr.write(f"stardelt: cannot reach {reaching}\n")
         return ERROR
     stderr.write(f"stardelt: signed in; the sign-in is kept in {path}\n")
     return OK

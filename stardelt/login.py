@@ -81,6 +81,21 @@ def discover(session, issuer):
     return meta
 
 
+def nova_sign_in(session, host):
+    """Ask Nova (``GET /api/auth/config``) which identity provider to sign in with.
+
+    Returns ``(issuer, client_id)``; ``client_id`` is ``None`` when Nova names no device client.
+    """
+    response = session.request("GET", host.rstrip("/") + "/api/auth/config", timeout=TIMEOUT)
+    try:
+        config = response.json() if response.status_code == 200 else {}
+    except ValueError:
+        config = {}
+    if not isinstance(config, dict) or config.get("mode") != "oidc" or not config.get("issuer"):
+        raise LoginError(f"{host} does not name an identity provider to sign in with (GET /api/auth/config)")
+    return config["issuer"], config.get("deviceClientId") or None
+
+
 def _creds(issuer, client_id, token_endpoint, body, now, previous=None):
     refresh = body.get("refresh_token") or (previous or {}).get("refresh_token")
     return {
