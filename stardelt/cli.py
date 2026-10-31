@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from stardelt import api, mcp
+from stardelt import api, mcp, shortcuts
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -34,7 +34,13 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _parser():
-    parser = _Parser(prog="stardelt", description="A thin client for Nova's public API.")
+    parser = _Parser(
+        prog="stardelt",
+        description="A thin client for Nova's public API.",
+        epilog="resources (stardelt RESOURCE VERB [VALUES...], same options as `api`):\n"
+        + shortcuts.summary(api.operations()),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--host", help="Nova's base URL (default: $STARDELT_NOVA_URL)")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("whoami", help="who Nova thinks you are (JSON)")
@@ -135,8 +141,8 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
     stderr = sys.stderr if stderr is None else stderr
     stdin = sys.stdin if stdin is None else stdin
     try:
-        args = _parser().parse_args(argv)
-    except _UsageError as err:
+        args = _parser().parse_args(shortcuts.expand(sys.argv[1:] if argv is None else argv, api.operations()))
+    except (_UsageError, ValueError) as err:
         stderr.write(f"stardelt: {err}\n")
         return USAGE
     except SystemExit as exit_:  # --help prints itself and exits 0
