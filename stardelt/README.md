@@ -190,3 +190,16 @@ nova = stardelt.api.Client()
 nova.call("table_history", path={"ns": "demo", "tbl": "trips"})
 nova.call("pipelines_run_trigger", path={"namespace": "etl", "name": "nyc_taxi"})
 ```
+
+### An MCP server for agents
+
+`stardelt mcp serve` is a local MCP server (stdio) over the same contract: each tool is one public
+operation, named by its `operationId`. Only read operations are offered by default; `--allow
+query_run` adds one more (SQL, or any write you name) on purpose. It runs as the person whose token
+is in `STARDELT_TOKEN`, and what it returns is data, never instructions. `stardelt mcp config` prints
+the line that registers it in Claude Code and the `.mcp.json` snippet (the token stays a placeholder):
+
+```bash
+claude mcp add --transport stdio --env STARDELT_NOVA_URL=https://nova.example.com \
+  --env 'STARDELT_TOKEN=<your bearer token>' stardelt -- stardelt mcp serve
+```
