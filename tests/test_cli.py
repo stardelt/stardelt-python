@@ -48,6 +48,29 @@ def test_sql_csv_has_a_header_row():
     assert (code, out) == (0, "x,y\n1,a\n2,b\n")
 
 
+def test_sql_long_runs_the_query_as_a_statement_and_prints_the_same_table():
+    done = {"statementId": "q1", "state": "SUCCEEDED", "columns": RESULT["columns"], "rows": RESULT["rows"], "rowCount": 2, "chunks": 1, "truncated": False}
+    code, out, _, session = run(["sql", "select x, y", "--long"], FakeResponse(200, done), FakeResponse(204, None))
+    assert (code, out) == (0, "x  y\n1  a\n2  b\n")
+    assert [(m, u.rsplit("/api", 1)[1]) for m, u, _ in session.calls] == [("POST", "/statements"), ("DELETE", "/statements/q1")]
+
+
+def test_sql_long_exits_1_with_the_engine_sentence_when_the_statement_fails():
+    failed = {"statementId": "q1", "state": "FAILED", "error": "SYNTAX_ERROR: line 1:1", "columns": [], "rowCount": 0, "chunks": 0, "truncated": False}
+    code, out, err, _ = run(["sql", "select x from", "--long"], FakeResponse(200, failed), FakeResponse(204, None))
+    assert (code, out, err) == (1, "", "stardelt: SYNTAX_ERROR: line 1:1\n")
+
+
+def test_ctrl_c_during_sql_long_says_interrupted_and_exits_1():
+    class Interrupted(FakeSession):
+        def request(self, method, url, **kwargs):
+            raise KeyboardInterrupt
+
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(["sql", "select 1", "--long"], environ=ENV, stdout=out, stderr=err, session=Interrupted())
+    assert (code, out.getvalue(), err.getvalue()) == (1, "", "stardelt: interrupted\n")
+
+
 def test_max_rows_cuts_what_is_printed():
     code, out, _, _ = run(["sql", "q", "--max-rows", "1"], FakeResponse(payload=RESULT))
     assert (code, out) == (0, "x  y\n1  a\n")

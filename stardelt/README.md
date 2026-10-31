@@ -20,6 +20,7 @@ import stardelt.api
 nova = stardelt.api.Client()      # STARDELT_NOVA_URL and the notebook's own token
 nova.me()                         # the signed-in person, a dict
 nova.query("select 1 as x").to_pandas()
+nova.statement("select * from warehouse.demo.trips").to_pandas()   # long queries: polled, up to 100000 rows
 ```
 
 `Client(base_url=None, token=None)` sends the token as a bearer token (a string, or a function that returns
@@ -185,6 +186,7 @@ stardelt login                                 # once, see below
 stardelt whoami
 stardelt sql "select 1 as x" --format json     # table (default), json or csv
 stardelt sql "select * from warehouse.demo.trips" --max-rows 20
+stardelt sql "select * from warehouse.demo.trips" --long      # as a statement: up to 100000 rows, Ctrl-C cancels it
 ```
 
 `stardelt login` signs you in with a code you approve in a browser (the device flow). It asks Nova
