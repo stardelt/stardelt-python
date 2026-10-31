@@ -22,7 +22,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, login, mcp, runs, shortcuts, statements
+from stardelt import api, apply, login, mcp, runs, shortcuts, skill, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -91,6 +91,8 @@ def _parser():
     )
     serve.add_argument("--no-sql", action="store_true", help="leave out the guarded SQL tools sql_read and sql_explain")
     server_commands.add_parser("config", help="print how to register the server in an MCP client")
+    advice = commands.add_parser("skill", help="print the agent skill (SKILL.md); with --write DIR install it")
+    advice.add_argument("--write", metavar="DIR", help="write DIR/stardelt/SKILL.md, for example .claude/skills")
     return parser
 
 
@@ -214,6 +216,17 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
 
     if args.command == "mcp" and args.mcp_command == "config":
         stdout.write(mcp.config_text((args.host or environ.get("STARDELT_NOVA_URL", "")).strip()))
+        return OK
+
+    if args.command == "skill":
+        if args.write is None:
+            stdout.write(skill.text())
+            return OK
+        try:
+            stderr.write(f"stardelt: wrote {skill.write(args.write)}\n")
+        except OSError as err:
+            stderr.write(f"stardelt: {err}\n")
+            return ERROR
         return OK
 
     if args.command == "login":
