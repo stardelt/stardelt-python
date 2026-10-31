@@ -191,6 +191,19 @@ nova.call("table_history", path={"ns": "demo", "tbl": "trips"})
 nova.call("pipelines_run_trigger", path={"namespace": "etl", "name": "nyc_taxi"})
 ```
 
+### Resource commands
+
+The same operations have short names: the first word of an `operationId` is the resource, the rest
+is the verb (joined with dashes), and the values of the path follow in the order of the path.
+`stardelt --help` lists them; `stardelt pipelines` lists the verbs and the values each one takes.
+The options are those of `stardelt api`.
+
+```bash
+stardelt pipelines list --format table
+stardelt pipelines get etl nyc_taxi                    # = api pipelines_get -p namespace=etl -p name=nyc_taxi
+stardelt table history demo trips --format table
+```
+
 ### An MCP server for agents
 
 `stardelt mcp serve` is a local MCP server (stdio) over the same contract: each tool is one public
