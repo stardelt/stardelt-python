@@ -98,6 +98,38 @@ def test_run_wait_exits_1_and_names_the_failed_tasks_when_the_run_failed():
     assert json.loads(out)["state"] == "failed"
 
 
+def test_sql_reads_the_statement_from_a_file(tmp_path):
+    query = tmp_path / "q.sql"
+    query.write_text("select x, y\nfrom t\n", encoding="utf-8")
+    code, out, _, session = run(["sql", "-f", str(query)], FakeResponse(payload=RESULT))
+    assert (code, out) == (0, "x  y\n1  a\n2  b\n")
+    assert session.calls[0][2]["json"] == {"sql": "select x, y\nfrom t\n"}
+
+
+def test_sql_dash_reads_the_statement_from_standard_input():
+    out, err = io.StringIO(), io.StringIO()
+    session = FakeSession(FakeResponse(payload=RESULT))
+    code = cli.main(["sql", "-f", "-"], environ=ENV, stdout=out, stderr=err, session=session, stdin=io.StringIO("select 1"))
+    assert code == 0 and session.calls[0][2]["json"] == {"sql": "select 1"}
+
+
+def test_sql_needs_exactly_one_of_the_statement_and_a_file(tmp_path):
+    query = tmp_path / "q.sql"
+    query.write_text("select 1", encoding="utf-8")
+    for argv in (["sql"], ["sql", "select 1", "-f", str(query)]):
+        code, _, err, session = run(argv)
+        assert (code, session.calls) == (2, []) and "not both and not neither" in err
+
+
+def test_sql_file_problems_are_usage_errors_and_send_nothing(tmp_path):
+    empty = tmp_path / "empty.sql"
+    empty.write_text(" \n", encoding="utf-8")
+    code, _, err, session = run(["sql", "-f", str(empty)])
+    assert (code, session.calls) == (2, []) and "the statement is empty" in err
+    code, _, err, session = run(["sql", "-f", str(tmp_path / "missing.sql")])
+    assert (code, session.calls) == (2, []) and "missing.sql" in err
+
+
 def test_max_rows_cuts_what_is_printed():
     code, out, _, _ = run(["sql", "q", "--max-rows", "1"], FakeResponse(payload=RESULT))
     assert (code, out) == (0, "x  y\n1  a\n")
