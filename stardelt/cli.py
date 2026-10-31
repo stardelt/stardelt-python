@@ -4,6 +4,7 @@
     stardelt login --issuer https://id.example.com/realms/stardelt   # once; or: export STARDELT_TOKEN=... (CI)
     stardelt whoami
     stardelt sql "select 1 as x" --format json
+    stardelt apply -f pipeline.json            # create or update a pipeline; --dry-run writes nothing
 
 Results go to stdout; messages and errors go to stderr. The exit code is 0 for success,
 1 for an error, 2 for wrong usage and 3 when authentication is needed. A token is never
@@ -16,10 +17,11 @@ import io
 import json
 import os
 import sys
+from pathlib import Path
 
 import requests
 
-from stardelt import api, login, mcp, shortcuts
+from stardelt import api, apply, login, mcp, shortcuts
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -63,6 +65,9 @@ def _parser():
     call.add_argument(
         "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
     )
+    deploy = commands.add_parser("apply", help="create or update a pipeline from a JSON file")
+    deploy.add_argument("-f", "--file", required=True, help="the pipeline as JSON, or - for stdin")
+    deploy.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     server = commands.add_parser("mcp", help="a local MCP server over the public API")
     server_commands = server.add_subparsers(dest="mcp_command", required=True)
     serve = server_commands.add_parser("serve", help="serve the read-only tools on stdio, for an MCP client")
@@ -192,6 +197,14 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         stderr.write("stardelt: signed out\n" if login.forget(environ) else "stardelt: there was no stored sign-in\n")
         return OK
 
+    spec = None
+    if args.command == "apply":
+        try:
+            spec = apply.load(stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8"))
+        except (OSError, apply.ApplyError) as err:
+            stderr.write(f"stardelt: {err}\n")
+            return USAGE
+
     stored = login.load(environ)
     host = (args.host or environ.get("STARDELT_NOVA_URL", "") or (stored or {}).get("host") or "").strip()
     if not host:
@@ -209,6 +222,9 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
     try:
         if args.command == "whoami":
             stdout.write(json.dumps(nova.me(), indent=2, ensure_ascii=False) + "\n")
+            return OK
+        if args.command == "apply":
+            stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
             return OK
         if args.command == "mcp":
             allowed = list(mcp.DEFAULT_TOOLS) + [n for n in args.allow if n not in mcp.DEFAULT_TOOLS]
