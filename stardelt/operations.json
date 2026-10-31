@@ -22,6 +22,17 @@
       "query_params": [],
       "body": false
     },
+    "catalog_search": {
+      "method": "GET",
+      "path": "/api/catalog/search",
+      "path_params": [],
+      "query_params": [
+        "q",
+        "catalog",
+        "limit"
+      ],
+      "body": false
+    },
     "catalogs_list": {
       "method": "GET",
       "path": "/api/catalog/catalogs",
