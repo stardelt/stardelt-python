@@ -5,6 +5,7 @@
     stardelt whoami
     stardelt sql "select 1 as x" --format json
     stardelt apply -f pipeline.json            # create or update a pipeline; --dry-run writes nothing
+    stardelt apply -f pipelines/               # every .json, .yaml and .yml file of a directory, in name order
 
 Results go to stdout; messages and errors go to stderr. The exit code is 0 for success,
 1 for an error, 2 for wrong usage and 3 when authentication is needed. A token is never
@@ -80,7 +81,7 @@ def _parser():
         "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
     )
     deploy = commands.add_parser("apply", help="create or update a pipeline from a JSON or YAML file")
-    deploy.add_argument("-f", "--file", required=True, help="the pipeline as JSON or YAML, or - for stdin")
+    deploy.add_argument("-f", "--file", required=True, help="a pipeline as JSON or YAML, a directory of such files, or - for stdin")
     deploy.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     server = commands.add_parser("mcp", help="a local MCP server over the public API")
     server_commands = server.add_subparsers(dest="mcp_command", required=True)
@@ -221,10 +222,10 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         stderr.write("stardelt: signed out\n" if login.forget(environ) else "stardelt: there was no stored sign-in\n")
         return OK
 
-    spec = None
+    specs = None
     if args.command == "apply":
         try:
-            spec = apply.load(stdin.read() if args.file == "-" else Path(args.file).read_text(encoding="utf-8"))
+            specs = [apply.load(stdin.read())] if args.file == "-" else apply.load_path(args.file)
         except (OSError, apply.ApplyError) as err:
             stderr.write(f"stardelt: {err}\n")
             return USAGE
@@ -264,7 +265,8 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             stdout.write(json.dumps(nova.me(), indent=2, ensure_ascii=False) + "\n")
             return OK
         if args.command == "apply":
-            stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
+            for spec in specs:
+                stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
             return OK
         if args.command == "run":
             run, tasks = runs.start(nova, args.namespace, args.name, args.wait, args.timeout or None, args.interval)

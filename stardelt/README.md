@@ -240,7 +240,9 @@ the same file can run on every deploy. The file is one JSON or YAML object shape
 `options`. `-f -` reads stdin. `--dry-run` says what would happen and writes nothing. An update replaces
 what the file says (`params` and `options` left out go back to their defaults); the group of an existing
 pipeline cannot change. The answer on stdout is `{"action": "created" | "updated" | "would-create" |
-"would-update", "name": ...}`.
+"would-update", "name": ...}`. `-f` can also name a directory: every `.json`, `.yaml` and `.yml` file directly
+inside it is applied in name order, one answer line per file; all files are read first, so a bad file or two
+files with one pipeline name write nothing.
 
 ```bash
 cat > pipeline.json <<'JSON'
