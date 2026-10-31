@@ -21,7 +21,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, login, mcp, shortcuts
+from stardelt import api, apply, login, mcp, shortcuts, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -57,6 +57,11 @@ def _parser():
     sql.add_argument("--format", choices=["table", "json", "csv"], default="table")
     sql.add_argument(
         "--max-rows", type=int, default=0, help="print at most N rows (0: all Nova returned)"
+    )
+    sql.add_argument(
+        "--long",
+        action="store_true",
+        help="run it as a statement: no request stays open, up to 100000 rows, Ctrl-C cancels it in the engine",
     )
     call = commands.add_parser("api", help="call any public operation by its operationId")
     call.add_argument("operation", nargs="?", help="an operationId (see --list)")
@@ -256,7 +261,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             elif answer is not None:
                 stdout.write(json.dumps(answer, indent=2, ensure_ascii=False) + "\n")
             return OK
-        result = nova.query(args.statement)
+        result = statements.run(nova, args.statement) if args.long else nova.query(args.statement)
         stdout.write(_render(result, args.format, args.max_rows))
         if result.truncated:
             stderr.write(f"stardelt: Nova cut the result at {len(result.rows)} rows\n")
@@ -264,6 +269,12 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
     except login.LoginError as err:
         stderr.write(f"stardelt: {err}\n")
         return AUTH
+    except statements.StatementError as err:
+        stderr.write(f"stardelt: {err}\n")
+        return ERROR
+    except KeyboardInterrupt:
+        stderr.write("stardelt: interrupted\n")
+        return ERROR
     except api.StardeltApiError as err:
         if err.status == 401:
             stderr.write(f"stardelt: authentication needed: {err}\n")

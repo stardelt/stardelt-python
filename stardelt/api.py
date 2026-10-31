@@ -173,6 +173,15 @@ class Client:
         """``POST /api/query``: run one statement as the caller. Rows beyond Nova's cap are cut and ``truncated`` is true."""
         return QueryResult(self._request("POST", "/api/query", json={"sql": sql}).json())
 
+    def statement(self, sql, max_seconds=None):
+        """Like ``query``, through the statement API: no request stays open, up to 100 000 rows, cancelled when it fails.
+
+        ``max_seconds`` cancels a statement that takes longer (default: no limit). See ``stardelt.statements``.
+        """
+        from stardelt import statements
+
+        return statements.run(self, sql, max_seconds)
+
     def call(self, operation_id, path=None, query=None, body=None):
         """Any public operation by its ``operationId`` (see ``operations()``).
 
