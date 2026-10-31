@@ -71,6 +71,33 @@ def test_ctrl_c_during_sql_long_says_interrupted_and_exits_1():
     assert (code, out.getvalue(), err.getvalue()) == (1, "", "stardelt: interrupted\n")
 
 
+def run_answer(state, *tasks):
+    return FakeResponse(
+        200, {"run": {"runId": "manual__1", "state": state, "type": "manual"}, "tasks": [{"taskId": t, "state": v, "tryNumber": 1} for t, v in tasks]}
+    )
+
+
+QUEUED = FakeResponse(201, {"runId": "manual__1", "state": "queued", "type": "manual"})
+
+
+def test_run_starts_a_pipeline_and_prints_the_queued_run():
+    code, out, _, session = run(["run", "etl", "daily"], QUEUED)
+    assert (code, json.loads(out)["state"]) == (0, "queued")
+    assert [(m, u.rsplit("/api", 1)[1]) for m, u, _ in session.calls] == [("POST", "/pipelines/etl/daily/runs")]
+
+
+def test_run_wait_exits_0_when_the_run_succeeded_and_prints_its_tasks():
+    code, out, _, _ = run(["run", "etl", "daily", "--wait", "--interval", "0"], QUEUED, run_answer("success", ("load", "success")))
+    assert code == 0 and json.loads(out)["tasks"] == [{"taskId": "load", "state": "success", "tryNumber": 1}]
+
+
+def test_run_wait_exits_1_and_names_the_failed_tasks_when_the_run_failed():
+    answer = run_answer("failed", ("extract", "success"), ("load", "failed"), ("report", "upstream_failed"))
+    code, out, err, _ = run(["run", "etl", "daily", "--wait", "--interval", "0"], QUEUED, answer)
+    assert (code, err) == (1, "stardelt: run manual__1 ended failed; failed tasks: load\n")
+    assert json.loads(out)["state"] == "failed"
+
+
 def test_max_rows_cuts_what_is_printed():
     code, out, _, _ = run(["sql", "q", "--max-rows", "1"], FakeResponse(payload=RESULT))
     assert (code, out) == (0, "x  y\n1  a\n")
