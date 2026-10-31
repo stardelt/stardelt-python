@@ -231,7 +231,7 @@ stardelt table history demo trips --format table
 ### Apply a pipeline from a file
 
 `stardelt apply -f pipeline.json` creates the pipeline, or updates it when one of that name exists, so
-the same file can run on every deploy. The file is one JSON object shaped like the body of
+the same file can run on every deploy. The file is one JSON or YAML object shaped like the body of
 `pipelines_create`: `name`, `ownerGroup`, `sql` (or `notebook`), and optionally `schedule`, `params` and
 `options`. `-f -` reads stdin. `--dry-run` says what would happen and writes nothing. An update replaces
 what the file says (`params` and `options` left out go back to their defaults); the group of an existing
@@ -244,6 +244,17 @@ cat > pipeline.json <<'JSON'
 JSON
 stardelt apply -f pipeline.json --dry-run
 stardelt apply -f pipeline.json
+```
+
+The same pipeline as YAML (`pipeline.yaml`; a value that YAML reads as a date or a number must be quoted if it is
+meant as text):
+
+```yaml
+name: daily
+ownerGroup: etl
+sql: select 1
+schedule:
+  cron: "0 3 * * *"
 ```
 
 ### An MCP server for agents

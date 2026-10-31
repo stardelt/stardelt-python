@@ -67,8 +67,8 @@ def _parser():
     call.add_argument(
         "--format", choices=["json", "table"], default="json", help="json (default) or a table when the answer is a list"
     )
-    deploy = commands.add_parser("apply", help="create or update a pipeline from a JSON file")
-    deploy.add_argument("-f", "--file", required=True, help="the pipeline as JSON, or - for stdin")
+    deploy = commands.add_parser("apply", help="create or update a pipeline from a JSON or YAML file")
+    deploy.add_argument("-f", "--file", required=True, help="the pipeline as JSON or YAML, or - for stdin")
     deploy.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     server = commands.add_parser("mcp", help="a local MCP server over the public API")
     server_commands = server.add_subparsers(dest="mcp_command", required=True)
