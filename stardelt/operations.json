@@ -454,6 +454,13 @@
       ],
       "body": false
     },
+    "statements_list": {
+      "method": "GET",
+      "path": "/api/statements",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
     "statements_submit": {
       "method": "POST",
       "path": "/api/statements",
