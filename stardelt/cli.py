@@ -93,6 +93,10 @@ def _parser():
     server_commands.add_parser("config", help="print how to register the server in an MCP client")
     package = commands.add_parser("bundle", help="work with a bundle: a directory in Git that describes what a team publishes")
     package_commands = package.add_subparsers(dest="bundle_command", required=True)
+    scaffold = package_commands.add_parser("init", help="write a small bundle that passes validate")
+    scaffold.add_argument("directory", nargs="?", default=".", help="where to write it (default: the current directory)")
+    scaffold.add_argument("--name", required=True, help="the bundle's name (lower-case letters, digits, dashes)")
+    scaffold.add_argument("--group", required=True, help="the group that owns the bundle's pipelines")
     check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
     check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check.add_argument("-t", "--target", help="check this target only")
@@ -221,6 +225,15 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
 
     if args.command == "mcp" and args.mcp_command == "config":
         stdout.write(mcp.config_text((args.host or environ.get("STARDELT_NOVA_URL", "")).strip()))
+        return OK
+
+    if args.command == "bundle" and args.bundle_command == "init":
+        try:
+            written = bundle.init(args.directory, args.name, args.group)
+        except ValueError as err:
+            stderr.write(f"stardelt: {err}\n")
+            return USAGE
+        stderr.write(f"stardelt: wrote {', '.join(written)} in {args.directory}; now: stardelt bundle validate {args.directory}\n")
         return OK
 
     if args.command == "bundle":

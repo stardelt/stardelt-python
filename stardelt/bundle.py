@@ -164,3 +164,57 @@ def validate(directory, target=None):
     for v in sorted(set(variables) - used):
         warnings.append(f"variable {v!r} is declared but no pipeline file uses it")
     return problems, warnings, resolved
+
+
+MANIFEST = """bundle:
+  name: {name}
+  ownerGroup: {group}
+variables:
+  catalog:
+    default: warehouse
+    description: the catalog the pipelines read
+include: [resources/*.yaml]
+files: [sql/*.sql]
+requires:
+  connections: []
+targets:
+  dev:
+    mode: development
+    variables: {{catalog: warehouse}}
+  prod:
+    mode: production
+    variables: {{catalog: warehouse}}
+    runAs: pipeline-{group}
+"""
+PIPELINE = """name: daily
+sqlFile: sql/daily.sql
+params:
+  catalog: "${var.catalog}"
+schedule:
+  cron: "0 3 * * *"
+"""
+STATEMENT = "-- Replace this with your statement. ${params.catalog} is filled in from the pipeline's params.\nselect count(*) as trips from ${params.catalog}.demo.trips\n"
+
+
+def init(directory, name, group):
+    """Write a small bundle that passes ``validate`` into ``directory``; returns the files written.
+
+    Raises ``ValueError`` (one sentence) for a bad name or group, or when ``bundle.yaml`` already exists.
+    """
+    root = Path(directory)
+    if not NAME.match(name):
+        raise ValueError("the name must be 3 to 40 characters: lower-case letters, digits and dashes")
+    if not GROUP.match(group):
+        raise ValueError("the group must be a group name")
+    if (root / "bundle.yaml").exists():
+        raise ValueError(f"{root / 'bundle.yaml'} already exists")
+    files = {
+        "bundle.yaml": MANIFEST.format(name=name, group=group),
+        "resources/daily.yaml": PIPELINE,
+        "sql/daily.sql": STATEMENT,
+    }
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return sorted(files)
