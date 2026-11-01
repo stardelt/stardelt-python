@@ -174,6 +174,73 @@ def validate(directory, target=None):
     return problems, warnings, resolved
 
 
+def _slug(user):
+    """A person's sign-in name as part of a pipeline name: lower-case letters, digits and single dashes."""
+    return re.sub(r"[^a-z0-9]+", "-", str(user or "").lower()).strip("-")
+
+
+def render(directory, target, user=None):
+    """The pipelines of one target as the bodies ``pipelines_create`` takes: ``(problems, mode, specs)``.
+
+    Everything ``validate`` checks is checked first. Then each pipeline file gets its variables, its ``sqlFile`` read
+    into ``sql`` and the bundle's group as ``ownerGroup`` when it names none. A ``development`` target deploys under
+    ``dev-<user>-<name>`` (two people can deploy one bundle side by side) and without a schedule (run it with
+    ``stardelt run``); a ``production`` target deploys as written. A notebook that is a file of the bundle cannot be
+    sent yet. ``specs`` is empty when there are problems.
+    """
+    problems, _, _ = validate(directory, target)
+    if problems:
+        return problems, None, []
+    root = Path(directory)
+    manifest = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))
+    chosen = manifest["targets"][target]
+    mode = chosen["mode"]
+    if mode == "development" and not _slug(user):
+        return [(f"targets.{target}", "a development target needs the name of the person who deploys: sign in first")], mode, []
+    owner = manifest["bundle"]["ownerGroup"]
+    values = {v: (d or {}).get("default") for v, d in (manifest.get("variables") or {}).items() if (d or {}).get("default") is not None}
+    values.update(chosen.get("variables") or {})
+    specs = []
+    for relative in _files(root, manifest["include"], "include", []):
+        where = f"{relative} ({target})"
+        doc = apply.load(_substitute((root / relative).read_text(encoding="utf-8"), values, [], where))
+        doc.setdefault("ownerGroup", owner)
+        if "sqlFile" in doc:
+            doc["sql"] = (root / doc.pop("sqlFile")).read_text(encoding="utf-8")
+        notebook = doc.get("notebook")
+        if isinstance(notebook, dict) and "file" in notebook:
+            problems.append((where, "a notebook that is a file of the bundle cannot be deployed yet: publish it and name its version"))
+        if mode == "development":
+            doc["name"] = f"dev-{_slug(user)}-{doc['name']}"
+            doc.pop("schedule", None)
+            if len(doc["name"]) > 40:
+                problems.append((where, f"the development name {doc['name']} is longer than 40 characters"))
+        specs.append(doc)
+    return problems, mode, ([] if problems else specs)
+
+
+def deploy(nova, directory, target, dry_run=False):
+    """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
+
+    ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
+    ``--dry-run`` of ``apply``); when anything is refused nothing is written and the refusals are the problems.
+    ``results`` are the answers of ``apply``: ``would-create`` / ``would-update`` for a plan, ``created`` /
+    ``updated`` for a deploy. There is no deployment record and nothing is removed that the bundle no longer names.
+    """
+    problems, _, specs = render(directory, target, nova.me().get("user"))
+    if problems:
+        return problems, []
+    results, refused = [], []
+    for spec in specs:
+        try:
+            results.append(apply.apply(nova, spec, dry_run=True))
+        except apply.ApplyError as err:
+            refused.append((target, str(err)))
+    if refused or dry_run:
+        return refused, results
+    return [], [apply.apply(nova, spec) for spec in specs]
+
+
 MANIFEST = """bundle:
   name: {name}
   ownerGroup: {group}
