@@ -5,13 +5,14 @@ The check needs no host and no sign-in. It is deliberately *less* than the serve
 principal is ready or a notebook version exists); it catches what a pull request can be refused for before anything runs.
 """
 
+import difflib
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
 import yaml
 
-from stardelt import apply
+from stardelt import api, apply
 
 KEYS = {"bundle", "variables", "include", "files", "requires", "targets"}
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
@@ -269,13 +270,58 @@ def _stale(nova, bundle_name, target, mode, user, keep):
     return [(p["namespace"], p["name"]) for p in _deployed(nova, bundle_name, target, mode, user) if p["name"] not in keep]
 
 
+def _lines(value):
+    """A field of a pipeline document as lines: a statement as it is, anything else as YAML."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return value.splitlines()
+    return yaml.dump(value, Dumper=apply._BlockDumper, sort_keys=False, allow_unicode=True, default_flow_style=False).splitlines()
+
+
+def _diffs(nova, specs, results):
+    """``{name: text}``: for each ``would-update`` pipeline, a unified diff of every field Nova says would change.
+
+    ``deployment`` (the stamp: the commit changes with every deploy) is not shown. A pipeline whose deployed document
+    cannot be read gets one sentence instead of a diff.
+    """
+    wanted = [r for r in results if r.get("action") == "would-update" and set(r.get("changes", [])) - {"deployment"}]
+    if not wanted:
+        return {}
+    namespaces = {p["name"]: p["namespace"] for p in nova.call("pipelines_list")["pipelines"]}
+    new_documents = {spec["name"]: spec for spec in specs}
+    found = {}
+    for result in wanted:
+        name = result["name"]
+        try:
+            old_document = nova.call("pipelines_spec", path={"namespace": namespaces[name], "name": name})["document"]
+        except (KeyError, api.StardeltApiError) as err:
+            found[name] = f"{name}: the difference is not available ({err})"
+            continue
+        parts = []
+        for change in result["changes"]:
+            if change == "deployment":
+                continue
+            key = "sql" if change == "statement" else change
+            parts += difflib.unified_diff(
+                _lines(old_document.get(key)),
+                _lines(new_documents[name].get(key)),
+                fromfile=f"{name} {key} (deployed)",
+                tofile=f"{name} {key} (bundle)",
+                lineterm="",
+                n=2,
+            )
+        found[name] = "\n".join(parts)
+    return found
+
+
 def _drift_mode(directory, target):
     """What the target says to do about a pipeline someone changed after its last deploy: ``warn`` (default) or ``block``."""
     manifest = yaml.safe_load((Path(directory) / "bundle.yaml").read_text(encoding="utf-8"))
     return ((manifest.get("targets") or {}).get(target) or {}).get("drift", "warn")
 
 
-def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False):
+def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False, diff=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
     ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
@@ -286,7 +332,8 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
     succeeded. Every pipeline carries the bundle's name, the target and the Git commit of the bundle
     directory (``provenance``), which Nova stamps on it. There is no deployment record and nothing is removed that
     the bundle no longer names. A target with ``drift: block`` refuses, for a plan and a deploy alike, a pipeline someone changed
-    after its last deploy (``modified``) unless ``accept_drift``; the default ``warn`` only reports it.
+    after its last deploy (``modified``) unless ``accept_drift``; the default ``warn`` only reports it. With ``diff`` each
+    ``would-update`` (and ``updated``) result carries a ``diff`` text: what Nova would change, field by field.
     """
     user = nova.me().get("user")
     problems, mode, specs = render(directory, target, user)
@@ -308,11 +355,20 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
             (target, f"{name} was changed after its last deploy and this target says drift: block; look at the change, then pass --accept-drift to overwrite it")
             for name in sorted(changed_by_hand)
         ]
+    diffs = _diffs(nova, specs, results) if diff else {}
+    results = [{**r, "diff": diffs[r["name"]]} if diffs.get(r["name"]) else r for r in results]
     stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
         return refused, results
-    done = [{**apply.apply(nova, spec), **({"modified": True} if spec["name"] in changed_by_hand else {})} for spec in specs]
+    done = [
+        {
+            **apply.apply(nova, spec),
+            **({"modified": True} if spec["name"] in changed_by_hand else {}),
+            **({"diff": diffs[spec["name"]]} if diffs.get(spec["name"]) else {}),
+        }
+        for spec in specs
+    ]
     for namespace, name in stale:
         nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
         done.append({"action": "deleted", "name": name})

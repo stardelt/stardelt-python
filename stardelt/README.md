@@ -212,6 +212,10 @@ succeeded, the pipelines an earlier deploy of this bundle target stamped and the
 or by another bundle or target, is never touched, and a development target removes only your own `dev-<your name>-` ones.
 A pipeline someone changed after its last deploy (in the interface or with `kubectl`) shows `"modified": true` in its answer line
 of `plan` and `deploy` and one warning on standard error; the deploy still overwrites that change.
+`bundle plan --diff` (and `bundle deploy --diff`) also shows, on standard error as a unified diff, what each update would
+change: for every field Nova names in `changes` (`statement`, `schedule`, `params`, `options`) the deployed value against the
+bundle's. The JSON lines on standard output keep their shape; a change of the stamp alone (`deployment`) shows nothing, and a
+deployed document that cannot be read is one sentence instead of a diff.
 A target can say what to do about a pipeline someone changed after its last deploy: `drift: warn` (the default) only reports it,
 `drift: block` (a key of the target in `bundle.yaml`, checked by `bundle validate`) makes `bundle plan` and `bundle deploy` fail
 with exit code 2, naming the pipeline, and a deploy writes nothing, until you look at the change and pass `--accept-drift` to
