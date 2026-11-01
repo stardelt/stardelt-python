@@ -191,6 +191,7 @@ stardelt sql -f report.sql --format csv                       # the statement fr
 stardelt run etl nyc_taxi --wait                                  # start a pipeline run and wait; exit 0 only when it succeeded
 stardelt skill --write .claude/skills                        # install the agent skill (SKILL.md) for an AI assistant; without --write it prints it
 stardelt bundle init shop --name shop-etl --group shop             # write a small bundle that passes validate
+stardelt bundle destroy pipelines/ -t dev                        # list what the dev deploy put on the stage; add --yes to remove it
 stardelt bundle generate etl daily pipelines/                  # write a pipeline made in the interface into the bundle: its file and its SQL file
 stardelt bundle validate pipelines/ -t prod                      # check a bundle (bundle.yaml + pipeline files) offline: no host, no sign-in
 stardelt bundle plan pipelines/ -t prod                          # ask Nova what deploying the target would do; writes nothing
@@ -210,6 +211,9 @@ succeeded, the pipelines an earlier deploy of this bundle target stamped and the
 or by another bundle or target, is never touched, and a development target removes only your own `dev-<your name>-` ones.
 A pipeline someone changed after its last deploy (in the interface or with `kubectl`) shows `"modified": true` in its answer line
 of `plan` and `deploy` and one warning on standard error; the deploy still overwrites that change.
+`bundle destroy -t TARGET` empties a stage: it lists as `would-delete` every pipeline an earlier deploy of this bundle target
+stamped (in a `development` target only your own `dev-<your name>-` ones) and removes them, as `deleted`, only when you add `--yes`.
+A pipeline made by hand, or stamped by another bundle or target, is never touched, and the files of the bundle stay.
 `bundle generate NAMESPACE NAME [DIRECTORY]` is the way in for a pipeline that was made in the interface: it writes
 `resources/<name>.yaml` (with `sqlFile: sql/<name>.sql` and without `ownerGroup`, which the bundle's group supplies) and
 `sql/<name>.sql` into an existing bundle. It writes nothing, and says why in one sentence, when `bundle.yaml` is missing, the

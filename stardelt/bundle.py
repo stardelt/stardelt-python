@@ -299,6 +299,32 @@ def deploy(nova, directory, target, dry_run=False, prune=False):
     return [], done
 
 
+def destroy(nova, directory, target, confirm=False):
+    """Remove everything an earlier deploy of ``target`` put on the stage: ``(problems, results)``.
+
+    The candidates are exactly the pipelines ``--prune`` would remove if the bundle named none: the ones stamped with this
+    bundle's name and this target (in a ``development`` target only the caller's own ``dev-<user>-`` ones). A pipeline made by
+    hand, or stamped by another bundle or target, is never touched. Without ``confirm`` nothing is removed and the results
+    are ``would-delete`` lines; with it each pipeline is deleted and the results are ``deleted`` lines. The files of the
+    bundle are not touched.
+    """
+    problems, _, resolved = validate(directory, target)
+    if problems:
+        return problems, []
+    mode = resolved[target][0]
+    user = nova.me().get("user")
+    if mode == "development" and not user:
+        return [(target, "sign in first: a development target removes only your own pipelines")], []
+    found = _stale(nova, provenance(directory, target)["bundle"], target, mode, user, set())
+    if not confirm:
+        return [], [{"action": "would-delete", "name": name} for _, name in found]
+    done = []
+    for namespace, name in found:
+        nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
+        done.append({"action": "deleted", "name": name})
+    return [], done
+
+
 MANIFEST = """bundle:
   name: {name}
   ownerGroup: {group}
