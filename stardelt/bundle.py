@@ -244,21 +244,26 @@ def provenance(directory, target):
     return {"bundle": name, "target": target, **({"revision": revision} if revision else {})}
 
 
-def _stale(nova, bundle_name, target, mode, user, keep):
-    """The pipelines an earlier deploy of this bundle target left that the bundle no longer names, as ``(namespace, name)``.
+def _deployed(nova, bundle_name, target, mode, user):
+    """The listed pipelines an earlier deploy of this bundle target left on the stage.
 
-    Only a pipeline that carries the stamp of this bundle and this target is a candidate (a pipeline made by hand,
-    or by another bundle or target, is never touched). In a ``development`` target only the caller's own ones, the
-    names that start with ``dev-<user>-``, count: two people deploy one bundle side by side.
+    Only a pipeline that carries the stamp of this bundle and this target counts (a pipeline made by hand,
+    or by another bundle or target, never does). In a ``development`` target only the caller's own ones, the
+    names that start with ``dev-<user>-``: two people deploy one bundle side by side.
     """
     prefix = f"dev-{_slug(user)}-" if mode == "development" else ""
-    found = []
-    for pipeline in nova.call("pipelines_list")["pipelines"]:
-        stamp = pipeline.get("deployment") or {}
-        name = pipeline["name"]
-        if stamp.get("bundle") == bundle_name and stamp.get("target") == target and name.startswith(prefix) and name not in keep:
-            found.append((pipeline["namespace"], name))
-    return found
+    return [
+        pipeline
+        for pipeline in nova.call("pipelines_list")["pipelines"]
+        if (pipeline.get("deployment") or {}).get("bundle") == bundle_name
+        and (pipeline.get("deployment") or {}).get("target") == target
+        and pipeline["name"].startswith(prefix)
+    ]
+
+
+def _stale(nova, bundle_name, target, mode, user, keep):
+    """The pipelines an earlier deploy of this bundle target left that the bundle no longer names, as ``(namespace, name)``."""
+    return [(p["namespace"], p["name"]) for p in _deployed(nova, bundle_name, target, mode, user) if p["name"] not in keep]
 
 
 def deploy(nova, directory, target, dry_run=False, prune=False):
@@ -297,6 +302,32 @@ def deploy(nova, directory, target, dry_run=False, prune=False):
         nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
         done.append({"action": "deleted", "name": name})
     return [], done
+
+
+def summary(nova, directory, target):
+    """What a deploy of ``target`` left on the stage, one row per pipeline: ``(problems, rows)``.
+
+    The rows are the pipelines ``destroy`` would list (stamped with this bundle's name and this target; in a
+    ``development`` target only the caller's own). Each row has the ``name`` and, when Nova knows them, the
+    ``revision`` (Git commit) it was deployed from, ``deployedBy``, ``deployedAt`` and ``modified`` (true when someone changed
+    the pipeline after the deploy). Nothing is written.
+    """
+    problems, _, resolved = validate(directory, target)
+    if problems:
+        return problems, []
+    mode = resolved[target][0]
+    user = nova.me().get("user")
+    if mode == "development" and not user:
+        return [(target, "sign in first: a development target shows only your own pipelines")], []
+    rows = []
+    for pipeline in sorted(_deployed(nova, provenance(directory, target)["bundle"], target, mode, user), key=lambda p: p["name"]):
+        stamp = pipeline["deployment"]
+        row = {"name": pipeline["name"]}
+        for key in ("revision", "deployedBy", "deployedAt", "modified"):
+            if stamp.get(key) is not None:
+                row[key] = stamp[key]
+        rows.append(row)
+    return [], rows
 
 
 def destroy(nova, directory, target, confirm=False):
