@@ -106,10 +106,12 @@ def _parser():
     plan = package_commands.add_parser("plan", help="ask Nova what deploying one target would do; writes nothing")
     plan.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     plan.add_argument("-t", "--target", required=True, help="the target to plan (a name under targets in bundle.yaml)")
+    plan.add_argument("--prune", action="store_true", help="also list the pipelines of this bundle target that the bundle no longer names")
     ship = package_commands.add_parser("deploy", help="deploy one target: Nova checks every pipeline first, then they are created or updated")
     ship.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     ship.add_argument("-t", "--target", required=True, help="the target to deploy (a name under targets in bundle.yaml)")
     ship.add_argument("--dry-run", action="store_true", help="the same as `bundle plan`")
+    ship.add_argument("--prune", action="store_true", help="also remove the pipelines of this bundle target that the bundle no longer names")
     check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
     check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check.add_argument("-t", "--target", help="check this target only")
@@ -340,7 +342,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             return OK
         if args.command == "bundle":  # plan or deploy: they talk to Nova
             problems, results = bundle.deploy(
-                nova, args.directory, args.target, dry_run=args.bundle_command == "plan" or args.dry_run
+                nova, args.directory, args.target, dry_run=args.bundle_command == "plan" or args.dry_run, prune=args.prune
             )
             for result in results:
                 stdout.write(json.dumps(result, ensure_ascii=False) + "\n")

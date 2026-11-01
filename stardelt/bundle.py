@@ -244,17 +244,37 @@ def provenance(directory, target):
     return {"bundle": name, "target": target, **({"revision": revision} if revision else {})}
 
 
-def deploy(nova, directory, target, dry_run=False):
+def _stale(nova, bundle_name, target, mode, user, keep):
+    """The pipelines an earlier deploy of this bundle target left that the bundle no longer names, as ``(namespace, name)``.
+
+    Only a pipeline that carries the stamp of this bundle and this target is a candidate (a pipeline made by hand,
+    or by another bundle or target, is never touched). In a ``development`` target only the caller's own ones, the
+    names that start with ``dev-<user>-``, count: two people deploy one bundle side by side.
+    """
+    prefix = f"dev-{_slug(user)}-" if mode == "development" else ""
+    found = []
+    for pipeline in nova.call("pipelines_list")["pipelines"]:
+        stamp = pipeline.get("deployment") or {}
+        name = pipeline["name"]
+        if stamp.get("bundle") == bundle_name and stamp.get("target") == target and name.startswith(prefix) and name not in keep:
+            found.append((pipeline["namespace"], name))
+    return found
+
+
+def deploy(nova, directory, target, dry_run=False, prune=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
     ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
     ``--dry-run`` of ``apply``); when anything is refused nothing is written and the refusals are the problems.
     ``results`` are the answers of ``apply``: ``would-create`` / ``would-update`` for a plan, ``created`` /
-    ``updated`` for a deploy. Every pipeline carries the bundle's name, the target and the Git commit of the bundle
+    ``updated`` for a deploy. With ``prune`` a pipeline an earlier deploy of this bundle target stamped and the bundle no
+    longer names is listed as ``would-delete`` and, in a real deploy, removed (``deleted``) after everything else
+    succeeded. Every pipeline carries the bundle's name, the target and the Git commit of the bundle
     directory (``provenance``), which Nova stamps on it. There is no deployment record and nothing is removed that
     the bundle no longer names.
     """
-    problems, _, specs = render(directory, target, nova.me().get("user"))
+    user = nova.me().get("user")
+    problems, mode, specs = render(directory, target, user)
     if problems:
         return problems, []
     stamp = provenance(directory, target)
@@ -265,9 +285,15 @@ def deploy(nova, directory, target, dry_run=False):
             results.append(apply.apply(nova, spec, dry_run=True))
         except apply.ApplyError as err:
             refused.append((target, str(err)))
+    stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
+    results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
         return refused, results
-    return [], [apply.apply(nova, spec) for spec in specs]
+    done = [apply.apply(nova, spec) for spec in specs]
+    for namespace, name in stale:
+        nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
+        done.append({"action": "deleted", "name": name})
+    return [], done
 
 
 MANIFEST = """bundle:

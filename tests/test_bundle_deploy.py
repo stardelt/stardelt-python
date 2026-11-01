@@ -161,3 +161,80 @@ def test_a_bundle_in_a_git_checkout_sends_its_commit_and_marks_uncommitted_chang
 def test_the_stamp_names_the_bundle_and_the_target_and_leaves_the_commit_out_without_git(tmp_path):
     make(tmp_path)
     assert bundle.provenance(tmp_path, "dev") == {"bundle": "sales-etl", "target": "dev"}
+
+
+def stamped(name, bundle_name="sales-etl", target="prod"):
+    return {"name": name, "namespace": "stardelt", "ownerGroup": "sales", "deployment": {"bundle": bundle_name, "target": target}}
+
+
+LISTING = {
+    "pipelines": [
+        stamped("load"),
+        stamped("nightly"),
+        stamped("old"),
+        stamped("old-in-dev", target="dev"),
+        stamped("theirs", bundle_name="other-bundle"),
+        {"name": "by-hand", "namespace": "stardelt", "ownerGroup": "sales"},
+    ]
+}
+
+
+def test_plan_with_prune_lists_only_what_this_bundle_target_deployed_and_no_longer_names(tmp_path):
+    make(tmp_path)
+    code, out, err, session = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod", "--prune"],
+        ME, FakeResponse(payload=CREATE), FakeResponse(payload=UPDATE), FakeResponse(payload=LISTING),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line)["action"] + " " + json.loads(line)["name"] for line in out.splitlines()] == [
+        "would-create load", "would-update nightly", "would-delete old",
+    ]
+    assert [method for method, _ in calls(session)] == ["GET", "POST", "POST", "GET"], "nothing is deleted by a plan"
+
+
+def test_deploy_with_prune_removes_them_after_everything_else_succeeded(tmp_path):
+    make(tmp_path)
+    existing = {"pipelines": [{"name": "nightly", "namespace": "stardelt", "ownerGroup": "sales"}]}
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod", "--prune"],
+        ME, FakeResponse(payload=CREATE), FakeResponse(payload=UPDATE), FakeResponse(payload=LISTING),
+        FakeResponse(payload={"pipelines": []}), FakeResponse(201, {"name": "load"}),
+        FakeResponse(payload=existing), FakeResponse(payload={"name": "nightly"}),
+        FakeResponse(204),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "created", "name": "load"},
+        {"action": "updated", "name": "nightly"},
+        {"action": "deleted", "name": "old"},
+    ]
+    assert calls(session)[-1] == ("DELETE", "/api/pipelines/stardelt/old")
+    assert [method for method, _ in calls(session)].count("DELETE") == 1
+
+
+def test_a_development_target_prunes_only_the_callers_own_pipelines(tmp_path):
+    make(tmp_path)
+    listing = {
+        "pipelines": [
+            stamped("dev-alice-load", target="dev"),
+            stamped("dev-alice-old", target="dev"),
+            stamped("dev-bob-old", target="dev"),
+        ]
+    }
+    code, out, _, _ = run(
+        ["bundle", "plan", str(tmp_path), "-t", "dev", "--prune"],
+        ME, FakeResponse(payload=CREATE), FakeResponse(payload=CREATE), FakeResponse(payload=listing),
+    )
+    assert code == 0
+    assert [json.loads(line)["name"] for line in out.splitlines() if "would-delete" in line] == ["dev-alice-old"]
+
+
+def test_a_refusal_means_nothing_is_deleted_either(tmp_path):
+    make(tmp_path)
+    refused = {"ok": False, "errors": [{"message": "no"}], "changes": [], "nextRuns": []}
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod", "--prune"],
+        ME, FakeResponse(payload=refused), FakeResponse(payload=UPDATE), FakeResponse(payload=LISTING),
+    )
+    assert code == 2 and "load: no" in err
+    assert [method for method, _ in calls(session)] == ["GET", "POST", "POST", "GET"], "no write, no delete"
