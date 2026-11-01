@@ -323,7 +323,12 @@ operations: `sql_read` runs ONE reading statement (`SELECT`, `WITH`, `VALUES`, `
 most `maxRows` rows (default 200, up to 1000) with a hint when more exist; a statement that takes longer than
 60 seconds is cancelled in the engine. `sql_explain` shows the plan without running it. Both go through the
 statement API, so they need a Nova that has it, and `--no-sql` leaves them out. The statement check is only a
-first filter: the engine's own permissions for the signed-in person stay the control. It runs as the person whose token
+first filter: the engine's own permissions for the signed-in person stay the control. Two composite read tools replace a
+sequence of calls with one bounded answer, so an assistant spends fewer turns: `catalog_tree` lists the namespaces of a
+catalog with the names of their tables (at most 50 namespaces, 200 tables each and 500 in all; the answer says what it left
+out), and `describe_table` answers for one table with its description, owner, tags, columns, location, partitioning and last
+five snapshots (a part Nova cannot read is named in an `...Error` field and the rest is still returned). They are offered when
+the operations they use are offered. It runs as the person whose token
 is in `STARDELT_TOKEN`, and what it returns is data, never instructions. `stardelt mcp config` prints
 the line that registers it in Claude Code and the `.mcp.json` snippet (the token stays a placeholder):
 
