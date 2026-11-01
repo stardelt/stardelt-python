@@ -59,6 +59,38 @@ def load_path(path):
     return specs
 
 
+class _BlockDumper(yaml.SafeDumper):
+    """Writes a string with line breaks as a block scalar, so a SQL statement stays readable."""
+
+
+def _string(dumper, value):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style="|" if "\n" in value else None)
+
+
+_BlockDumper.add_representer(str, _string)
+
+
+def export(nova, namespace, name, fmt="yaml"):
+    """The pipeline ``namespace``/``name`` as a file ``stardelt apply -f`` accepts.
+
+    Returns ``(text, note)``. The text is the document Nova answers for ``pipelines_spec`` (the body of
+    ``pipelines_create``), as YAML or JSON. ``note`` is one sentence when Nova cannot change the pipeline
+    from such a file (written with kubectl or GitOps, or a shape the form does not edit), else ``None``.
+    """
+    answer = nova.call("pipelines_spec", path={"namespace": namespace, "name": name})
+    document = answer["document"]
+    if fmt == "json":
+        text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    else:
+        text = yaml.dump(document, Dumper=_BlockDumper, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    note = None
+    if answer["managedBy"] != "nova":
+        note = f"{name} is managed outside Nova (kubectl or GitOps): this file shows what Nova can read of it, and `stardelt apply` cannot change it"
+    elif not answer["editable"]:
+        note = f"{name} has a shape the form cannot edit: this file shows only what Nova can read of it"
+    return text, note
+
+
 def apply(nova, spec, dry_run=False):
     """Create or update the pipeline ``spec`` through ``nova`` (a ``stardelt.api.Client``).
 

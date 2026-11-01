@@ -6,6 +6,7 @@
     stardelt sql "select 1 as x" --format json
     stardelt apply -f pipeline.json            # create or update a pipeline; --dry-run writes nothing
     stardelt apply -f pipelines/               # every .json, .yaml and .yml file of a directory, in name order
+    stardelt export NAMESPACE NAME > p.yaml    # a pipeline made in the interface, as a file `apply` accepts
 
 Results go to stdout; messages and errors go to stderr. The exit code is 0 for success,
 1 for an error, 2 for wrong usage and 3 when authentication is needed. A token is never
@@ -83,6 +84,10 @@ def _parser():
     deploy = commands.add_parser("apply", help="create or update a pipeline from a JSON or YAML file")
     deploy.add_argument("-f", "--file", required=True, help="a pipeline as JSON or YAML, a directory of such files, or - for stdin")
     deploy.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
+    export = commands.add_parser("export", help="write a pipeline as a file that `apply` accepts (YAML by default)")
+    export.add_argument("namespace")
+    export.add_argument("name")
+    export.add_argument("--format", choices=["yaml", "json"], default="yaml", help="yaml (default) or json")
     server = commands.add_parser("mcp", help="a local MCP server over the public API")
     server_commands = server.add_subparsers(dest="mcp_command", required=True)
     serve = server_commands.add_parser("serve", help="serve the read-only tools on stdio, for an MCP client")
@@ -324,6 +329,12 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if args.command == "apply":
             for spec in specs:
                 stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
+            return OK
+        if args.command == "export":
+            text, note = apply.export(nova, args.namespace, args.name, args.format)
+            stdout.write(text)
+            if note:
+                stderr.write(f"stardelt: note: {note}\n")
             return OK
         if args.command == "run":
             run, tasks = runs.start(nova, args.namespace, args.name, args.wait, args.timeout or None, args.interval)

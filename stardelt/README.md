@@ -261,6 +261,15 @@ stardelt apply -f pipeline.json --dry-run
 stardelt apply -f pipeline.json
 ```
 
+`stardelt export NAMESPACE NAME` goes the other way: it writes a pipeline made in the interface as a file
+`stardelt apply -f` accepts (YAML, or `--format json`), the statement as a block scalar. Commit it, and the
+next change goes through the same file. A pipeline written outside Nova (kubectl, GitOps) or with a shape the
+form does not edit is still exported, with a note on stderr that `apply` cannot change it.
+
+```bash
+stardelt export etl daily > pipelines/daily.yaml
+```
+
 The same pipeline as YAML (`pipeline.yaml`; a value that YAML reads as a date or a number must be quoted if it is
 meant as text):
 
