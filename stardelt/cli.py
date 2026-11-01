@@ -112,6 +112,12 @@ def _parser():
     ship.add_argument("-t", "--target", required=True, help="the target to deploy (a name under targets in bundle.yaml)")
     ship.add_argument("--dry-run", action="store_true", help="the same as `bundle plan`")
     ship.add_argument("--prune", action="store_true", help="also remove the pipelines of this bundle target that the bundle no longer names")
+    adopt = package_commands.add_parser(
+        "generate", help="write a pipeline that was made in the interface into the bundle: its file and its SQL file"
+    )
+    adopt.add_argument("namespace")
+    adopt.add_argument("name")
+    adopt.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
     check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check.add_argument("-t", "--target", help="check this target only")
@@ -339,6 +345,14 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if args.command == "apply":
             for spec in specs:
                 stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
+            return OK
+        if args.command == "bundle" and args.bundle_command == "generate":
+            try:
+                written = bundle.generate(nova, args.directory, args.namespace, args.name)
+            except bundle.GenerateError as err:
+                stderr.write(f"stardelt: {err}\n")
+                return USAGE
+            stderr.write(f"stardelt: wrote {', '.join(written)} in {args.directory}; now: stardelt bundle validate {args.directory}\n")
             return OK
         if args.command == "bundle":  # plan or deploy: they talk to Nova
             problems, results = bundle.deploy(

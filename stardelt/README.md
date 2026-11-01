@@ -191,6 +191,7 @@ stardelt sql -f report.sql --format csv                       # the statement fr
 stardelt run etl nyc_taxi --wait                                  # start a pipeline run and wait; exit 0 only when it succeeded
 stardelt skill --write .claude/skills                        # install the agent skill (SKILL.md) for an AI assistant; without --write it prints it
 stardelt bundle init shop --name shop-etl --group shop             # write a small bundle that passes validate
+stardelt bundle generate etl daily pipelines/                  # write a pipeline made in the interface into the bundle: its file and its SQL file
 stardelt bundle validate pipelines/ -t prod                      # check a bundle (bundle.yaml + pipeline files) offline: no host, no sign-in
 stardelt bundle plan pipelines/ -t prod                          # ask Nova what deploying the target would do; writes nothing
 stardelt bundle deploy pipelines/ -t prod                        # Nova checks every pipeline, then they are created or updated
@@ -207,6 +208,11 @@ what a bundle owns.
 `--prune` (on `plan` and `deploy`) also lists as `would-delete`, and with `deploy` removes as `deleted` after everything else
 succeeded, the pipelines an earlier deploy of this bundle target stamped and the bundle no longer names; a pipeline made by hand,
 or by another bundle or target, is never touched, and a development target removes only your own `dev-<your name>-` ones.
+`bundle generate NAMESPACE NAME [DIRECTORY]` is the way in for a pipeline that was made in the interface: it writes
+`resources/<name>.yaml` (with `sqlFile: sql/<name>.sql` and without `ownerGroup`, which the bundle's group supplies) and
+`sql/<name>.sql` into an existing bundle. It writes nothing, and says why in one sentence, when `bundle.yaml` is missing, the
+pipeline belongs to another group than the bundle or cannot be changed from a file, a file already exists (it never overwrites),
+or the bundle's `include` or `files` would not pick the new file up. The next `bundle deploy` of a `production` target updates that pipeline and stamps it.
 Not yet: a notebook that is a file of the bundle (publish it and name its version) and a deployment record.
 
 `stardelt login` signs you in with a code you approve in a browser (the device flow). It asks Nova

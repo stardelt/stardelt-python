@@ -7,7 +7,7 @@ principal is ready or a notebook version exists); it catches what a pull request
 
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -344,6 +344,64 @@ def init(directory, name, group):
         "resources/daily.yaml": PIPELINE,
         "sql/daily.sql": STATEMENT,
     }
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return sorted(files)
+
+
+class GenerateError(ValueError):
+    """The one sentence that says why ``generate`` wrote nothing."""
+
+
+def _picked_up(relative, patterns):
+    return isinstance(patterns, list) and any(PurePosixPath(relative).match(p) for p in patterns if isinstance(p, str))
+
+
+def generate(nova, directory, namespace, name):
+    """Write the pipeline ``namespace``/``name`` into the bundle in ``directory``; returns the relative paths written.
+
+    The pipeline goes to ``resources/<name>.yaml``; a statement goes to ``sql/<name>.sql`` and is named there as
+    ``sqlFile``. ``ownerGroup`` is left out because the bundle's group is the default. Raises ``GenerateError`` (one
+    sentence) and writes nothing when ``bundle.yaml`` cannot be read, the pipeline is not one a file can change, belongs
+    to another group than the bundle, a file would be overwritten, or the bundle's ``include`` or ``files`` would not
+    pick a new file up.
+    """
+    root = Path(directory)
+    try:
+        manifest = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        raise GenerateError(f"{root / 'bundle.yaml'} is missing or cannot be read: write one with `stardelt bundle init`") from None
+    if not isinstance(manifest, dict):
+        raise GenerateError(f"{root / 'bundle.yaml'} must be a mapping")
+    head = manifest.get("bundle") if isinstance(manifest.get("bundle"), dict) else {}
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", name):
+        raise GenerateError(f"{name!r} is not a plain pipeline name")
+    answer = nova.call("pipelines_spec", path={"namespace": namespace, "name": name})
+    if answer["managedBy"] != "nova" or not answer["editable"]:
+        raise GenerateError(f"{name} cannot be changed from a file (it is managed outside Nova, or has a shape the form cannot edit)")
+    document = dict(answer["document"])
+    group = document.pop("ownerGroup", None)
+    if group != head.get("ownerGroup"):
+        raise GenerateError(f"{name} belongs to the group {group}, the bundle to {head.get('ownerGroup')}: a bundle publishes the pipelines of one group")
+    document.pop("name", None)
+    statement = document.pop("sql", None)
+    pipeline = {"name": name}
+    files = {}
+    if statement is not None:
+        pipeline["sqlFile"] = f"sql/{name}.sql"
+        files[pipeline["sqlFile"]] = statement if statement.endswith("\n") else statement + "\n"
+    pipeline.update(document)
+    files[f"resources/{name}.yaml"] = yaml.dump(
+        pipeline, Dumper=apply._BlockDumper, sort_keys=False, allow_unicode=True, default_flow_style=False
+    )
+    for relative in sorted(files):
+        key = "files" if relative.startswith("sql/") else "include"
+        if not _picked_up(relative, manifest.get(key)):
+            raise GenerateError(f"{relative} would not be picked up: add a pattern for it under {key} in bundle.yaml")
+        if (root / relative).exists():
+            raise GenerateError(f"{root / relative} already exists: generate does not overwrite it")
     for relative, text in files.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
