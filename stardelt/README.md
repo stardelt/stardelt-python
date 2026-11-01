@@ -204,8 +204,10 @@ written and the sentences are shown. A `development` target deploys under `dev-<
 Every pipeline is sent with where it came from (the bundle's name, the target and the Git commit of the directory, `-dirty`
 appended when files are uncommitted; no commit outside a Git checkout) and Nova stamps that on it, so a later change can tell
 what a bundle owns.
-Not yet: a notebook that is a file of the bundle (publish it and name its version), removing what the bundle no longer names, and
-a deployment record.
+`--prune` (on `plan` and `deploy`) also lists as `would-delete`, and with `deploy` removes as `deleted` after everything else
+succeeded, the pipelines an earlier deploy of this bundle target stamped and the bundle no longer names; a pipeline made by hand,
+or by another bundle or target, is never touched, and a development target removes only your own `dev-<your name>-` ones.
+Not yet: a notebook that is a file of the bundle (publish it and name its version) and a deployment record.
 
 `stardelt login` signs you in with a code you approve in a browser (the device flow). It asks Nova
 (`GET /api/auth/config`, no sign-in needed) which identity provider to use and which public client to sign in with;
