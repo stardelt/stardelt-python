@@ -6,6 +6,7 @@ principal is ready or a notebook version exists); it catches what a pull request
 """
 
 import difflib
+import json
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,7 @@ GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 CONNECTION = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 USE = re.compile(r"\$\{var\.([A-Za-z0-9_]+)\}")
+NOTEBOOK_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.ipynb$")
 MODES = ("development", "production")
 DRIFT = ("warn", "block")
 MAX_FILES = 100
@@ -171,6 +173,13 @@ def validate(directory, target=None):
             notebook = doc.get("notebook")
             if isinstance(notebook, dict) and "file" in notebook and notebook["file"] not in files:
                 problems.append((f"{relative} ({tname})", f"notebook file {notebook['file']!r} is not among the bundle's files"))
+            if isinstance(notebook, dict) and "file" in notebook:
+                if not NOTEBOOK_NAME.match(PurePosixPath(str(notebook["file"])).name):
+                    problems.append(
+                        (f"{relative} ({tname})", f"notebook file {notebook['file']!r}: the file name must end in .ipynb, start with a letter or digit and use only letters, digits, '.', '_', '-' and spaces (at most 128 characters)")
+                    )
+                if {"name", "objectVersion"} & set(notebook):
+                    problems.append((f"{relative} ({tname})", "a notebook that names a file cannot also name a version: remove name and objectVersion"))
         for dup in sorted({n for n in names if names.count(n) > 1}):
             problems.append((where, f"two pipeline files define {dup!r}"))
         resolved[tname] = (mode, names)
@@ -190,8 +199,8 @@ def render(directory, target, user=None):
     Everything ``validate`` checks is checked first. Then each pipeline file gets its variables, its ``sqlFile`` read
     into ``sql`` and the bundle's group as ``ownerGroup`` when it names none. A ``development`` target deploys under
     ``dev-<user>-<name>`` (two people can deploy one bundle side by side) and without a schedule (run it with
-    ``stardelt run``); a ``production`` target deploys as written. A notebook that is a file of the bundle cannot be
-    sent yet. ``specs`` is empty when there are problems.
+    ``stardelt run``); a ``production`` target deploys as written. A notebook that is a file of the bundle stays
+    ``notebook: {file: ...}`` here: ``deploy`` publishes it and pins the version. ``specs`` is empty when there are problems.
     """
     problems, _, _ = validate(directory, target)
     if problems:
@@ -212,9 +221,6 @@ def render(directory, target, user=None):
         doc.setdefault("ownerGroup", owner)
         if "sqlFile" in doc:
             doc["sql"] = (root / doc.pop("sqlFile")).read_text(encoding="utf-8")
-        notebook = doc.get("notebook")
-        if isinstance(notebook, dict) and "file" in notebook:
-            problems.append((where, "a notebook that is a file of the bundle cannot be deployed yet: publish it and name its version"))
         if mode == "development":
             doc["name"] = f"dev-{_slug(user)}-{doc['name']}"
             doc.pop("schedule", None)
@@ -321,6 +327,48 @@ def _drift_mode(directory, target):
     return ((manifest.get("targets") or {}).get(target) or {}).get("drift", "warn")
 
 
+def _notebook(spec):
+    """The notebook of a pipeline spec when it is a file of the bundle (``notebook: {file: ...}``), else ``None``."""
+    notebook = spec.get("notebook")
+    return notebook if isinstance(notebook, dict) and "file" in notebook else None
+
+
+def _publish(nova, directory, spec, dry_run):
+    """The answer of ``notebooks_publish`` for the notebook file of ``spec``; with ``dry_run`` Nova only says what a
+    publish would do (``unchanged``) and stores nothing. Nova's own sentence is the ``ApplyError`` when it refuses."""
+    file = spec["notebook"]["file"]
+    try:
+        document = json.loads((Path(directory) / file).read_text(encoding="utf-8"))
+    except ValueError as err:
+        raise apply.ApplyError(f"{spec['name']}: {file} is not a notebook: {err}") from err
+    try:
+        return nova.call(
+            "notebooks_publish",
+            path={"group": spec["ownerGroup"], "name": PurePosixPath(file).name},
+            query={"dryRun": True} if dry_run else None,
+            body=document,
+        )
+    except api.StardeltApiError as err:
+        raise apply.ApplyError(f"{spec['name']}: {file}: {err}") from err
+
+
+def _pinned(spec, answer):
+    """``spec`` with its notebook file replaced by the version ``answer`` names: ``{name, objectVersion[, params]}``."""
+    notebook = spec["notebook"]
+    pinned = {"name": PurePosixPath(notebook["file"]).name, "objectVersion": answer["objectVersion"]}
+    if notebook.get("params"):
+        pinned["params"] = notebook["params"]
+    return {**spec, "notebook": pinned}
+
+
+def _blocked(target, names):
+    """The refusals of a ``drift: block`` target for the pipelines in ``names``."""
+    return [
+        (target, f"{name} was changed after its last deploy and this target says drift: block; look at the change, then pass --accept-drift to overwrite it")
+        for name in sorted(names)
+    ]
+
+
 def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False, diff=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
@@ -341,8 +389,20 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         return problems, []
     stamp = provenance(directory, target)
     specs = [{**spec, "provenance": stamp} for spec in specs]
-    results, refused, changed_by_hand = [], [], set()
-    for spec in specs:
+    results, refused, changed_by_hand, unpublished = [], [], set(), []
+    for position, spec in enumerate(specs):
+        if _notebook(spec):
+            try:
+                answer = _publish(nova, directory, spec, dry_run=True)
+            except apply.ApplyError as err:
+                refused.append((target, str(err)))
+                continue
+            if not answer["unchanged"]:
+                # There is no version to pin yet, so Nova cannot check this pipeline: a deploy publishes first.
+                unpublished.append(position)
+                results.append({"action": "would-publish", "name": spec["name"], "notebook": f"{spec['ownerGroup']}/{PurePosixPath(spec['notebook']['file']).name}"})
+                continue
+            specs[position] = spec = _pinned(spec, answer)
         try:
             results.append(apply.apply(nova, spec, dry_run=True))
         except apply.ApplyError as err:
@@ -351,17 +411,31 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
             if results[-1].get("modified"):
                 changed_by_hand.add(spec["name"])
     if changed_by_hand and not accept_drift and _drift_mode(directory, target) == "block":
-        refused += [
-            (target, f"{name} was changed after its last deploy and this target says drift: block; look at the change, then pass --accept-drift to overwrite it")
-            for name in sorted(changed_by_hand)
-        ]
+        refused += _blocked(target, changed_by_hand)
     diffs = _diffs(nova, specs, results) if diff else {}
     results = [{**r, "diff": diffs[r["name"]]} if diffs.get(r["name"]) else r for r in results]
     stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
         return refused, results
-    done = [
+    done = []
+    for position in unpublished:
+        spec = specs[position]
+        try:
+            answer = _publish(nova, directory, spec, dry_run=False)
+        except apply.ApplyError as err:
+            return [(target, str(err))], done
+        specs[position] = spec = _pinned(spec, answer)
+        done.append({"action": "published", "name": spec["name"], "notebook": f"{spec['ownerGroup']}/{spec['notebook']['name']}", "objectVersion": answer["objectVersion"]})
+        try:
+            verdict = apply.apply(nova, spec, dry_run=True)
+        except apply.ApplyError as err:
+            return [(target, str(err))], done
+        if verdict.get("modified"):
+            changed_by_hand.add(spec["name"])
+    if changed_by_hand and not accept_drift and _drift_mode(directory, target) == "block":
+        return _blocked(target, changed_by_hand), done
+    done += [
         {
             **apply.apply(nova, spec),
             **({"modified": True} if spec["name"] in changed_by_hand else {}),

@@ -50,13 +50,13 @@ def test_a_development_target_deploys_under_the_persons_name_without_a_schedule(
     assert specs == [] and "sign in first" in problems[0][1]
 
 
-def test_a_development_name_that_is_too_long_and_a_notebook_file_are_refused(tmp_path):
+def test_a_development_name_that_is_too_long_is_refused_and_a_notebook_file_stays_a_file(tmp_path):
     long = "name: " + "a" * 33 + "\nownerGroup: sales\nsql: select 1\n"
     problems, _, specs = bundle.render(make(tmp_path, resources={"long.yaml": long}), "dev", "alice")
     assert specs == [] and "longer than 40 characters" in problems[0][1]
     notebook = "name: nb\nownerGroup: sales\nnotebook: {file: notebooks/explore.ipynb}\n"
     problems, _, specs = bundle.render(make(tmp_path, resources={"nb.yaml": notebook}), "prod", "alice")
-    assert specs == [] and "cannot be deployed yet" in problems[0][1]
+    assert problems == [] and {spec["name"]: spec.get("notebook") for spec in specs}["nb"] == {"file": "notebooks/explore.ipynb"}
 
 
 def test_plan_asks_nova_about_every_pipeline_and_writes_nothing(tmp_path):
