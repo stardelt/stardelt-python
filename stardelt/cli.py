@@ -112,6 +112,12 @@ def _parser():
     ship.add_argument("-t", "--target", required=True, help="the target to deploy (a name under targets in bundle.yaml)")
     ship.add_argument("--dry-run", action="store_true", help="the same as `bundle plan`")
     ship.add_argument("--prune", action="store_true", help="also remove the pipelines of this bundle target that the bundle no longer names")
+    remove = package_commands.add_parser(
+        "destroy", help="remove what a deploy of one target put on the stage; lists it first, removes only with --yes"
+    )
+    remove.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
+    remove.add_argument("-t", "--target", required=True, help="the target to empty (a name under targets in bundle.yaml)")
+    remove.add_argument("--yes", action="store_true", help="really remove the pipelines (without it: only list them)")
     adopt = package_commands.add_parser(
         "generate", help="write a pipeline that was made in the interface into the bundle: its file and its SQL file"
     )
@@ -354,6 +360,15 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
                 stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
                 _warn_if_modified(result, stderr)
             return OK
+        if args.command == "bundle" and args.bundle_command == "destroy":
+            problems, results = bundle.destroy(nova, args.directory, args.target, confirm=args.yes)
+            for result in results:
+                stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+            for where, message in problems:
+                stderr.write(f"stardelt: {where}: {message}\n")
+            if not problems and not args.yes:
+                stderr.write("stardelt: nothing was removed; add --yes to remove what is listed\n" if results else "stardelt: nothing to remove\n")
+            return USAGE if problems else OK
         if args.command == "bundle" and args.bundle_command == "generate":
             try:
                 written = bundle.generate(nova, args.directory, args.namespace, args.name)
