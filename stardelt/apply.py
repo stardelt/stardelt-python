@@ -99,7 +99,8 @@ def apply(nova, spec, dry_run=False):
     (``pipelines_validate``). A refusal is an ``ApplyError`` with Nova's sentence; an accepted document
     answers ``would-create`` or ``would-update``; an update also lists ``changes`` (which of ``statement`` or
     ``notebook``, ``schedule``, ``params`` and ``options`` it would change; empty when it changes nothing), and
-    ``nextRuns`` (the next fire times) appears when the file has a schedule.
+    ``nextRuns`` (the next fire times) appears when the file has a schedule. ``modified: true`` appears when the
+    pipeline was changed after its last deploy, so applying the file overwrites that change.
     """
     name = spec["name"]
     if dry_run:
@@ -109,6 +110,8 @@ def apply(nova, spec, dry_run=False):
         result = {"action": f"would-{verdict['action']}", "name": name}
         if verdict["action"] == "update":
             result["changes"] = verdict["changes"]
+        if verdict.get("modified"):
+            result["modified"] = True
         if verdict["nextRuns"]:
             result["nextRuns"] = verdict["nextRuns"]
         return result
