@@ -17,7 +17,7 @@ targets:
   dev:  {mode: development, variables: {catalog: sales_dev}}
   prod: {mode: production, variables: {catalog: sales}, runAs: pipeline-sales}
 """
-LOAD = "name: load\nownerGroup: sales\nsqlFile: sql/load.sql\nschedule: {cron: '0 3 * * *'}\n"
+LOAD = "name: load\nownerGroup: sales\nsqlFile: sql/load.sql\nschedule: {cron: '0 3 * * *', timezone: Europe/Berlin}\n"
 NIGHTLY = "name: nightly\nsql: select * from ${var.catalog}.demo.trips\n"
 
 
@@ -127,6 +127,18 @@ def test_init_writes_a_bundle_that_validates(tmp_path):
     assert (problems, warnings) == ([], [])
     assert resolved == {"dev": ("development", ["daily"]), "prod": ("production", ["daily"])}
     assert "runAs: pipeline-shop" in (tmp_path / "shop" / "bundle.yaml").read_text()
+    assert "timezone: UTC" in (tmp_path / "shop" / "resources" / "daily.yaml").read_text(), "Nova needs both fields"
+
+
+def test_a_schedule_needs_both_cron_and_timezone_because_nova_refuses_it_otherwise(tmp_path):
+    sentence = "schedule needs both cron and timezone (an IANA zone such as Europe/Berlin)"
+    for schedule in ("{cron: '0 3 * * *'}", "{timezone: UTC}", "{cron: '', timezone: UTC}", "'0 3 * * *'", "{cron: 3, timezone: UTC}"):
+        resources = {"load.yaml": f"name: load\nownerGroup: sales\nsqlFile: sql/load.sql\nschedule: {schedule}\n"}
+        problems, _, _ = bundle.validate(make(tmp_path, resources=resources))
+        assert sentence in said(problems), schedule
+        assert "load.yaml (dev)" in said(problems) and "load.yaml (prod)" in said(problems), schedule
+    resources = {"load.yaml": "name: load\nownerGroup: sales\nsqlFile: sql/load.sql\n"}
+    assert bundle.validate(make(tmp_path, resources=resources))[0] == [], "a pipeline without a schedule runs on demand"
 
 
 def test_init_refuses_a_bad_name_a_bad_group_and_an_existing_bundle_and_writes_nothing(tmp_path):
