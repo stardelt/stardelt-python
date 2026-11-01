@@ -20,6 +20,7 @@ VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 CONNECTION = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 USE = re.compile(r"\$\{var\.([A-Za-z0-9_]+)\}")
 MODES = ("development", "production")
+DRIFT = ("warn", "block")
 MAX_FILES = 100
 MAX_BYTES = 5 * 1024 * 1024
 
@@ -128,6 +129,8 @@ def validate(directory, target=None):
         mode = spec.get("mode")
         if mode not in MODES:
             problems.append((where, f"mode must be one of {', '.join(MODES)}"))
+        if spec.get("drift", "warn") not in DRIFT:
+            problems.append((where, f"drift must be one of {', '.join(DRIFT)}"))
         tvars = spec.get("variables") or {}
         for v in tvars:
             if v not in variables:
@@ -266,7 +269,13 @@ def _stale(nova, bundle_name, target, mode, user, keep):
     return [(p["namespace"], p["name"]) for p in _deployed(nova, bundle_name, target, mode, user) if p["name"] not in keep]
 
 
-def deploy(nova, directory, target, dry_run=False, prune=False):
+def _drift_mode(directory, target):
+    """What the target says to do about a pipeline someone changed after its last deploy: ``warn`` (default) or ``block``."""
+    manifest = yaml.safe_load((Path(directory) / "bundle.yaml").read_text(encoding="utf-8"))
+    return ((manifest.get("targets") or {}).get(target) or {}).get("drift", "warn")
+
+
+def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
     ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
@@ -276,7 +285,8 @@ def deploy(nova, directory, target, dry_run=False, prune=False):
     longer names is listed as ``would-delete`` and, in a real deploy, removed (``deleted``) after everything else
     succeeded. Every pipeline carries the bundle's name, the target and the Git commit of the bundle
     directory (``provenance``), which Nova stamps on it. There is no deployment record and nothing is removed that
-    the bundle no longer names.
+    the bundle no longer names. A target with ``drift: block`` refuses, for a plan and a deploy alike, a pipeline someone changed
+    after its last deploy (``modified``) unless ``accept_drift``; the default ``warn`` only reports it.
     """
     user = nova.me().get("user")
     problems, mode, specs = render(directory, target, user)
@@ -293,6 +303,11 @@ def deploy(nova, directory, target, dry_run=False, prune=False):
         else:
             if results[-1].get("modified"):
                 changed_by_hand.add(spec["name"])
+    if changed_by_hand and not accept_drift and _drift_mode(directory, target) == "block":
+        refused += [
+            (target, f"{name} was changed after its last deploy and this target says drift: block; look at the change, then pass --accept-drift to overwrite it")
+            for name in sorted(changed_by_hand)
+        ]
     stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
