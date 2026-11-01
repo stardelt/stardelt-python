@@ -192,7 +192,17 @@ stardelt run etl nyc_taxi --wait                                  # start a pipe
 stardelt skill --write .claude/skills                        # install the agent skill (SKILL.md) for an AI assistant; without --write it prints it
 stardelt bundle init shop --name shop-etl --group shop             # write a small bundle that passes validate
 stardelt bundle validate pipelines/ -t prod                      # check a bundle (bundle.yaml + pipeline files) offline: no host, no sign-in
+stardelt bundle plan pipelines/ -t prod                          # ask Nova what deploying the target would do; writes nothing
+stardelt bundle deploy pipelines/ -t prod                        # Nova checks every pipeline, then they are created or updated
 ```
+
+`bundle plan` and `bundle deploy` (which also takes `--dry-run`, the same as `plan`) work on one target. Every pipeline file gets
+the target's variables, its `sqlFile` read into `sql` and the bundle's group as `ownerGroup`; then Nova checks each one
+(`pipelines_validate`) and the answer lines are those of `stardelt apply --dry-run`. If Nova refuses any pipeline, nothing is
+written and the sentences are shown. A `development` target deploys under `dev-<your name>-<pipeline>` and without a schedule
+(start it with `stardelt run`), so two people can deploy one bundle side by side; a `production` target deploys as written.
+Not yet: a notebook that is a file of the bundle (publish it and name its version), removing what the bundle no longer names, and
+a deployment record.
 
 `stardelt login` signs you in with a code you approve in a browser (the device flow). It asks Nova
 (`GET /api/auth/config`, no sign-in needed) which identity provider to use and which public client to sign in with;

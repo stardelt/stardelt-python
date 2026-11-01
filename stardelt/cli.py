@@ -7,6 +7,7 @@
     stardelt apply -f pipeline.json            # create or update a pipeline; --dry-run writes nothing
     stardelt apply -f pipelines/               # every .json, .yaml and .yml file of a directory, in name order
     stardelt export NAMESPACE NAME > p.yaml    # a pipeline made in the interface, as a file `apply` accepts
+    stardelt bundle deploy DIR -t prod         # check a bundle target with Nova (`bundle plan`), then create or update its pipelines
 
 Results go to stdout; messages and errors go to stderr. The exit code is 0 for success,
 1 for an error, 2 for wrong usage and 3 when authentication is needed. A token is never
@@ -102,6 +103,13 @@ def _parser():
     scaffold.add_argument("directory", nargs="?", default=".", help="where to write it (default: the current directory)")
     scaffold.add_argument("--name", required=True, help="the bundle's name (lower-case letters, digits, dashes)")
     scaffold.add_argument("--group", required=True, help="the group that owns the bundle's pipelines")
+    plan = package_commands.add_parser("plan", help="ask Nova what deploying one target would do; writes nothing")
+    plan.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
+    plan.add_argument("-t", "--target", required=True, help="the target to plan (a name under targets in bundle.yaml)")
+    ship = package_commands.add_parser("deploy", help="deploy one target: Nova checks every pipeline first, then they are created or updated")
+    ship.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
+    ship.add_argument("-t", "--target", required=True, help="the target to deploy (a name under targets in bundle.yaml)")
+    ship.add_argument("--dry-run", action="store_true", help="the same as `bundle plan`")
     check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
     check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check.add_argument("-t", "--target", help="check this target only")
@@ -241,7 +249,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         stderr.write(f"stardelt: wrote {', '.join(written)} in {args.directory}; now: stardelt bundle validate {args.directory}\n")
         return OK
 
-    if args.command == "bundle":
+    if args.command == "bundle" and args.bundle_command == "validate":
         problems, warnings, resolved = bundle.validate(args.directory, args.target)
         for warning in warnings:
             stderr.write(f"stardelt: warning: {warning}\n")
@@ -330,6 +338,15 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             for spec in specs:
                 stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
             return OK
+        if args.command == "bundle":  # plan or deploy: they talk to Nova
+            problems, results = bundle.deploy(
+                nova, args.directory, args.target, dry_run=args.bundle_command == "plan" or args.dry_run
+            )
+            for result in results:
+                stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+            for where, message in problems:
+                stderr.write(f"stardelt: {where}: {message}\n")
+            return USAGE if problems else OK
         if args.command == "export":
             text, note = apply.export(nova, args.namespace, args.name, args.format)
             stdout.write(text)
