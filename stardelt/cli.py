@@ -108,12 +108,14 @@ def _parser():
     plan.add_argument("-t", "--target", required=True, help="the target to plan (a name under targets in bundle.yaml)")
     plan.add_argument("--prune", action="store_true", help="also list the pipelines of this bundle target that the bundle no longer names")
     plan.add_argument("--accept-drift", action="store_true", help="overwrite a pipeline changed after its last deploy even when the target says drift: block")
+    plan.add_argument("--diff", action="store_true", help="also show, on standard error, what each update would change (the deployed value against the bundle's)")
     ship = package_commands.add_parser("deploy", help="deploy one target: Nova checks every pipeline first, then they are created or updated")
     ship.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     ship.add_argument("-t", "--target", required=True, help="the target to deploy (a name under targets in bundle.yaml)")
     ship.add_argument("--dry-run", action="store_true", help="the same as `bundle plan`")
     ship.add_argument("--prune", action="store_true", help="also remove the pipelines of this bundle target that the bundle no longer names")
     ship.add_argument("--accept-drift", action="store_true", help="overwrite a pipeline changed after its last deploy even when the target says drift: block")
+    ship.add_argument("--diff", action="store_true", help="also show, on standard error, what each update changes (the deployed value against the bundle's)")
     show = package_commands.add_parser(
         "summary", help="show what a deploy of one target left on the stage: commit, who, when, changed since"
     )
@@ -396,11 +398,17 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
         if args.command == "bundle":  # plan or deploy: they talk to Nova
             problems, results = bundle.deploy(
                 nova, args.directory, args.target, dry_run=args.bundle_command == "plan" or args.dry_run, prune=args.prune,
-                accept_drift=args.accept_drift,
+                accept_drift=args.accept_drift, diff=args.diff,
             )
+            shown = []
             for result in results:
+                text = result.pop("diff", None)
                 stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
                 _warn_if_modified(result, stderr)
+                if text:
+                    shown.append(text)
+            for text in shown:
+                stderr.write(text + "\n")
             for where, message in problems:
                 stderr.write(f"stardelt: {where}: {message}\n")
             return USAGE if problems else OK
