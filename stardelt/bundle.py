@@ -148,6 +148,14 @@ def validate(directory, target=None):
                 problems.append((f"{relative} ({tname})", str(err)))
                 continue
             names.append(doc["name"])
+            schedule = doc.get("schedule")
+            if "schedule" in doc and not (
+                isinstance(schedule, dict)
+                and all(isinstance(schedule.get(key), str) and schedule[key].strip() for key in ("cron", "timezone"))
+            ):
+                problems.append(
+                    (f"{relative} ({tname})", "schedule needs both cron and timezone (an IANA zone such as Europe/Berlin)")
+                )
             if doc.get("ownerGroup", owner) != owner:
                 problems.append((f"{relative} ({tname})", f"ownerGroup {doc['ownerGroup']!r} is not the bundle's group {owner!r}"))
             given = [k for k in ("sql", "sqlFile", "notebook") if k in doc]
@@ -192,6 +200,7 @@ params:
   catalog: "${var.catalog}"
 schedule:
   cron: "0 3 * * *"
+  timezone: UTC
 """
 STATEMENT = "-- Replace this with your statement. ${params.catalog} is filled in from the pipeline's params.\nselect count(*) as trips from ${params.catalog}.demo.trips\n"
 
