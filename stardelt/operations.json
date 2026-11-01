@@ -359,6 +359,16 @@
       "query_params": [],
       "body": false
     },
+    "pipelines_spec": {
+      "method": "GET",
+      "path": "/api/pipelines/{namespace}/{name}/spec",
+      "path_params": [
+        "namespace",
+        "name"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "pipelines_update": {
       "method": "PUT",
       "path": "/api/pipelines/{namespace}/{name}",
