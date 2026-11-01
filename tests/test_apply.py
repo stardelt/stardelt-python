@@ -57,13 +57,23 @@ def test_only_the_pipeline_of_that_name_counts_when_others_exist(tmp_path):
     assert session.calls[1][1] == "https://nova.example/api/pipelines/stardelt/daily"
 
 
-def test_dry_run_reads_but_writes_nothing(tmp_path):
-    code, out, _, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=EXISTING))
-    assert (code, json.loads(out), len(session.calls)) == (0, {"action": "would-update", "name": "daily"}, 1)
-    code, out, _, session = run(
-        ["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload={"pipelines": []})
-    )
+def test_dry_run_asks_nova_to_validate_and_writes_nothing(tmp_path):
+    runs = ["2026-11-02T03:00:00+01:00", "2026-11-03T03:00:00+01:00"]
+    verdict = {"ok": True, "action": "update", "errors": [], "nextRuns": runs}
+    code, out, _, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
+    assert (code, json.loads(out)) == (0, {"action": "would-update", "name": "daily", "nextRuns": runs})
+    assert [(m, u) for m, u, _ in session.calls] == [("POST", "https://nova.example/api/pipelines/validate")]
+    assert session.calls[0][2]["json"] == SPEC
+    verdict = {"ok": True, "action": "create", "errors": [], "nextRuns": []}
+    code, out, _, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
     assert (code, json.loads(out), len(session.calls)) == (0, {"action": "would-create", "name": "daily"}, 1)
+
+
+def test_dry_run_ends_with_the_sentence_nova_refused_with(tmp_path):
+    verdict = {"ok": False, "errors": [{"message": "you are not a member of the group etl"}], "nextRuns": []}
+    code, out, err, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
+    assert (code, out, len(session.calls)) == (2, "", 1)
+    assert err == "stardelt: daily: you are not a member of the group etl\n"
 
 
 def test_another_owner_group_is_refused_before_anything_is_written(tmp_path):
