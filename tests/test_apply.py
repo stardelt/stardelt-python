@@ -59,14 +59,21 @@ def test_only_the_pipeline_of_that_name_counts_when_others_exist(tmp_path):
 
 def test_dry_run_asks_nova_to_validate_and_writes_nothing(tmp_path):
     runs = ["2026-11-02T03:00:00+01:00", "2026-11-03T03:00:00+01:00"]
-    verdict = {"ok": True, "action": "update", "errors": [], "nextRuns": runs}
+    verdict = {"ok": True, "action": "update", "errors": [], "changes": ["statement"], "nextRuns": runs}
     code, out, _, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
-    assert (code, json.loads(out)) == (0, {"action": "would-update", "name": "daily", "nextRuns": runs})
+    expected = {"action": "would-update", "name": "daily", "changes": ["statement"], "nextRuns": runs}
+    assert (code, json.loads(out)) == (0, expected)
     assert [(m, u) for m, u, _ in session.calls] == [("POST", "https://nova.example/api/pipelines/validate")]
     assert session.calls[0][2]["json"] == SPEC
-    verdict = {"ok": True, "action": "create", "errors": [], "nextRuns": []}
+    verdict = {"ok": True, "action": "create", "errors": [], "changes": [], "nextRuns": []}
     code, out, _, session = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
     assert (code, json.loads(out), len(session.calls)) == (0, {"action": "would-create", "name": "daily"}, 1)
+
+
+def test_dry_run_of_an_update_that_changes_nothing_says_so(tmp_path):
+    verdict = {"ok": True, "action": "update", "errors": [], "changes": [], "nextRuns": []}
+    code, out, _, _ = run(["apply", "-f", write(tmp_path, SPEC), "--dry-run"], FakeResponse(payload=verdict))
+    assert (code, json.loads(out)) == (0, {"action": "would-update", "name": "daily", "changes": []})
 
 
 def test_dry_run_ends_with_the_sentence_nova_refused_with(tmp_path):

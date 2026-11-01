@@ -65,7 +65,9 @@ def apply(nova, spec, dry_run=False):
     Returns ``{"action": ..., "name": ...}`` where the action is ``created`` or ``updated``. With
     ``dry_run`` nothing is written: Nova checks the document with every rule a create runs
     (``pipelines_validate``). A refusal is an ``ApplyError`` with Nova's sentence; an accepted document
-    answers ``would-create`` or ``would-update``, and ``nextRuns`` (the next fire times) when it has a schedule.
+    answers ``would-create`` or ``would-update``; an update also lists ``changes`` (which of ``statement`` or
+    ``notebook``, ``schedule``, ``params`` and ``options`` it would change; empty when it changes nothing), and
+    ``nextRuns`` (the next fire times) appears when the file has a schedule.
     """
     name = spec["name"]
     if dry_run:
@@ -73,6 +75,8 @@ def apply(nova, spec, dry_run=False):
         if not verdict["ok"]:
             raise ApplyError(f"{name}: {verdict['errors'][0]['message']}")
         result = {"action": f"would-{verdict['action']}", "name": name}
+        if verdict["action"] == "update":
+            result["changes"] = verdict["changes"]
         if verdict["nextRuns"]:
             result["nextRuns"] = verdict["nextRuns"]
         return result
