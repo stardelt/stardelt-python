@@ -241,7 +241,8 @@ stardelt table history demo trips --format table
 `stardelt apply -f pipeline.json` creates the pipeline, or updates it when one of that name exists, so
 the same file can run on every deploy. The file is one JSON or YAML object shaped like the body of
 `pipelines_create`: `name`, `ownerGroup`, `sql` (or `notebook`), and optionally `schedule`, `params` and
-`options`. `-f -` reads stdin. `--dry-run` writes nothing: Nova checks the file with every rule a create
+`options`; a `schedule` needs both `cron` and `timezone` (an IANA zone such as `Europe/Berlin`).
+`-f -` reads stdin. `--dry-run` writes nothing: Nova checks the file with every rule a create
 runs (`pipelines_validate`) and the answer says what would happen, with the next fire times when the file
 has a schedule; an update lists `changes`, which of `statement` (or `notebook`), `schedule`, `params` and
 `options` it would change (an empty list: nothing); a rule that refuses ends the command with Nova's sentence
@@ -254,7 +255,7 @@ files with one pipeline name write nothing.
 
 ```bash
 cat > pipeline.json <<'JSON'
-{"name": "daily", "ownerGroup": "etl", "sql": "select 1", "schedule": {"cron": "0 3 * * *"}}
+{"name": "daily", "ownerGroup": "etl", "sql": "select 1", "schedule": {"cron": "0 3 * * *", "timezone": "Europe/Berlin"}}
 JSON
 stardelt apply -f pipeline.json --dry-run
 stardelt apply -f pipeline.json
@@ -269,6 +270,7 @@ ownerGroup: etl
 sql: select 1
 schedule:
   cron: "0 3 * * *"
+  timezone: Europe/Berlin
 ```
 
 ### An MCP server for agents
