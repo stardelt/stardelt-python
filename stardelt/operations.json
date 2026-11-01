@@ -217,7 +217,9 @@
         "group",
         "name"
       ],
-      "query_params": [],
+      "query_params": [
+        "dryRun"
+      ],
       "body": true
     },
     "notebooks_versions": {
