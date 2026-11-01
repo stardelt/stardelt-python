@@ -201,6 +201,9 @@ the target's variables, its `sqlFile` read into `sql` and the bundle's group as 
 (`pipelines_validate`) and the answer lines are those of `stardelt apply --dry-run`. If Nova refuses any pipeline, nothing is
 written and the sentences are shown. A `development` target deploys under `dev-<your name>-<pipeline>` and without a schedule
 (start it with `stardelt run`), so two people can deploy one bundle side by side; a `production` target deploys as written.
+Every pipeline is sent with where it came from (the bundle's name, the target and the Git commit of the directory, `-dirty`
+appended when files are uncommitted; no commit outside a Git checkout) and Nova stamps that on it, so a later change can tell
+what a bundle owns.
 Not yet: a notebook that is a file of the bundle (publish it and name its version), removing what the bundle no longer names, and
 a deployment record.
 
