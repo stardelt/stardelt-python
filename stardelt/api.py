@@ -121,6 +121,13 @@ class Resources:
         return Verbs(self._client, resource, self._resources[resource])
 
 
+def _query_value(value):
+    """A query value as Nova reads it. Python's ``True`` goes out as ``True``, which a boolean parameter refuses (400)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
 class Client:
     """Talks to one Nova. ``token`` is a string or a function returning one (called per request)."""
 
@@ -204,7 +211,7 @@ class Client:
             url_path = url_path.replace("{" + name + "}", quote(str(value), safe=""))
         kwargs = {}
         if query:
-            kwargs["params"] = query
+            kwargs["params"] = {name: _query_value(value) for name, value in query.items()}
         if body is not None:
             kwargs["json"] = body
         response = self._request(op["method"], url_path, **kwargs)
