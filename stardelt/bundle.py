@@ -279,17 +279,20 @@ def deploy(nova, directory, target, dry_run=False, prune=False):
         return problems, []
     stamp = provenance(directory, target)
     specs = [{**spec, "provenance": stamp} for spec in specs]
-    results, refused = [], []
+    results, refused, changed_by_hand = [], [], set()
     for spec in specs:
         try:
             results.append(apply.apply(nova, spec, dry_run=True))
         except apply.ApplyError as err:
             refused.append((target, str(err)))
+        else:
+            if results[-1].get("modified"):
+                changed_by_hand.add(spec["name"])
     stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
         return refused, results
-    done = [apply.apply(nova, spec) for spec in specs]
+    done = [{**apply.apply(nova, spec), **({"modified": True} if spec["name"] in changed_by_hand else {})} for spec in specs]
     for namespace, name in stale:
         nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
         done.append({"action": "deleted", "name": name})

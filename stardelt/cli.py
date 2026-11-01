@@ -126,6 +126,12 @@ def _parser():
     return parser
 
 
+def _warn_if_modified(result, stderr):
+    """One warning for a pipeline that was changed after its last deploy: applying a file overwrites that change."""
+    if result.get("modified"):
+        stderr.write(f"stardelt: warning: {result['name']} was changed after its last deploy; deploying overwrites that change\n")
+
+
 def _pairs(items):
     pairs = {}
     for item in items:
@@ -344,7 +350,9 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             return OK
         if args.command == "apply":
             for spec in specs:
-                stdout.write(json.dumps(apply.apply(nova, spec, args.dry_run), ensure_ascii=False) + "\n")
+                result = apply.apply(nova, spec, args.dry_run)
+                stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+                _warn_if_modified(result, stderr)
             return OK
         if args.command == "bundle" and args.bundle_command == "generate":
             try:
@@ -360,6 +368,7 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             )
             for result in results:
                 stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+                _warn_if_modified(result, stderr)
             for where, message in problems:
                 stderr.write(f"stardelt: {where}: {message}\n")
             return USAGE if problems else OK

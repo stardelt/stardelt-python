@@ -208,6 +208,8 @@ what a bundle owns.
 `--prune` (on `plan` and `deploy`) also lists as `would-delete`, and with `deploy` removes as `deleted` after everything else
 succeeded, the pipelines an earlier deploy of this bundle target stamped and the bundle no longer names; a pipeline made by hand,
 or by another bundle or target, is never touched, and a development target removes only your own `dev-<your name>-` ones.
+A pipeline someone changed after its last deploy (in the interface or with `kubectl`) shows `"modified": true` in its answer line
+of `plan` and `deploy` and one warning on standard error; the deploy still overwrites that change.
 `bundle generate NAMESPACE NAME [DIRECTORY]` is the way in for a pipeline that was made in the interface: it writes
 `resources/<name>.yaml` (with `sqlFile: sql/<name>.sql` and without `ownerGroup`, which the bundle's group supplies) and
 `sql/<name>.sql` into an existing bundle. It writes nothing, and says why in one sentence, when `bundle.yaml` is missing, the
@@ -270,7 +272,7 @@ has a schedule; an update lists `changes`, which of `statement` (or `notebook`),
 and exit code 2. An update replaces
 what the file says (`params` and `options` left out go back to their defaults); the group of an existing
 pipeline cannot change. The answer on stdout is `{"action": "created" | "updated" | "would-create" |
-"would-update", "name": ...}`, `"changes": [...]` on a dry run of an update, and `"nextRuns": [...]` on a dry run of a scheduled file. `-f` can also name a directory: every `.json`, `.yaml` and `.yml` file directly
+"would-update", "name": ...}`, `"changes": [...]` on a dry run of an update, `"nextRuns": [...]` on a dry run of a scheduled file, and `"modified": true` (with one warning on standard error) when the pipeline was changed in the interface or with `kubectl` after its last deploy, so the file overwrites that change. `-f` can also name a directory: every `.json`, `.yaml` and `.yml` file directly
 inside it is applied in name order, one answer line per file; all files are read first, so a bad file or two
 files with one pipeline name write nothing.
 
