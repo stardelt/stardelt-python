@@ -231,7 +231,13 @@ A pipeline made by hand, or stamped by another bundle or target, is never touche
 `sql/<name>.sql` into an existing bundle. It writes nothing, and says why in one sentence, when `bundle.yaml` is missing, the
 pipeline belongs to another group than the bundle or cannot be changed from a file, a file already exists (it never overwrites),
 or the bundle's `include` or `files` would not pick the new file up. The next `bundle deploy` of a `production` target updates that pipeline and stamps it.
-Not yet: a notebook that is a file of the bundle (publish it and name its version) and a deployment record.
+A pipeline can run a notebook that is a file of the bundle: `notebook: {file: notebooks/explore.ipynb, params: {rows: '5'}}` (the file
+must be among the bundle's `files`, end in `.ipynb` and be valid JSON; it is published to the bundle's group under its file name). `bundle plan`
+asks Nova what publishing it would do (`notebooks_publish` with `dryRun`, nothing is stored) and prints `would-publish` for a pipeline whose
+notebook changed: Nova can check that pipeline only once the new version exists. `bundle deploy` publishes the changed notebooks first (a
+`published` line with the `objectVersion`; publishing the same bytes again stores nothing), pins that version in the pipeline and then
+creates or updates it; a refusal after the publish keeps the published version. `prune` and `destroy` never delete a notebook: its versions are immutable.
+Not yet: a deployment record.
 
 `stardelt login` signs you in with a code you approve in a browser (the device flow). It asks Nova
 (`GET /api/auth/config`, no sign-in needed) which identity provider to use and which public client to sign in with;
