@@ -190,6 +190,7 @@ stardelt sql "select * from warehouse.demo.trips" --long      # as a statement: 
 stardelt sql -f report.sql --format csv                       # the statement from a file; -f - reads standard input
 stardelt run etl nyc_taxi --wait                                  # start a pipeline run and wait; exit 0 only when it succeeded
 stardelt skill --write .claude/skills                        # install the agent skill (SKILL.md) for an AI assistant; without --write it prints it
+stardelt bundle init shop --name shop-etl --group shop             # write a small bundle that passes validate
 stardelt bundle validate pipelines/ -t prod                      # check a bundle (bundle.yaml + pipeline files) offline: no host, no sign-in
 ```
 

@@ -118,3 +118,39 @@ def test_a_target_filter_and_an_unknown_target(tmp_path):
     problems, _, resolved = bundle.validate(tmp_path, "dev")
     assert problems == [] and list(resolved) == ["dev"]
     assert "no target named 'nope' (targets: dev, prod)" in said(bundle.validate(tmp_path, "nope")[0])
+
+
+def test_init_writes_a_bundle_that_validates(tmp_path):
+    written = bundle.init(tmp_path / "shop", "shop-etl", "shop")
+    assert written == ["bundle.yaml", "resources/daily.yaml", "sql/daily.sql"]
+    problems, warnings, resolved = bundle.validate(tmp_path / "shop")
+    assert (problems, warnings) == ([], [])
+    assert resolved == {"dev": ("development", ["daily"]), "prod": ("production", ["daily"])}
+    assert "runAs: pipeline-shop" in (tmp_path / "shop" / "bundle.yaml").read_text()
+
+
+def test_init_refuses_a_bad_name_a_bad_group_and_an_existing_bundle_and_writes_nothing(tmp_path):
+    for name, group, said in (("X", "shop", "the name must be"), ("shop-etl", "", "the group must be")):
+        try:
+            bundle.init(tmp_path, name, group)
+        except ValueError as err:
+            assert said in str(err)
+        else:
+            raise AssertionError("expected a ValueError")
+    assert list(tmp_path.iterdir()) == []
+    bundle.init(tmp_path, "shop-etl", "shop")
+    try:
+        bundle.init(tmp_path, "shop-etl", "shop")
+    except ValueError as err:
+        assert "already exists" in str(err)
+    else:
+        raise AssertionError("expected a ValueError")
+
+
+def test_the_init_command_says_what_it_wrote_and_exits_2_on_a_mistake(tmp_path):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(["bundle", "init", str(tmp_path / "b"), "--name", "shop-etl", "--group", "shop"], environ={}, stdout=out, stderr=err)
+    assert (code, out.getvalue()) == (0, "") and "wrote bundle.yaml, resources/daily.yaml, sql/daily.sql" in err.getvalue()
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(["bundle", "init", str(tmp_path / "b"), "--name", "shop-etl", "--group", "shop"], environ={}, stdout=out, stderr=err)
+    assert code == 2 and "already exists" in err.getvalue()
