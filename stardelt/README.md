@@ -243,10 +243,12 @@ the same file can run on every deploy. The file is one JSON or YAML object shape
 `pipelines_create`: `name`, `ownerGroup`, `sql` (or `notebook`), and optionally `schedule`, `params` and
 `options`. `-f -` reads stdin. `--dry-run` writes nothing: Nova checks the file with every rule a create
 runs (`pipelines_validate`) and the answer says what would happen, with the next fire times when the file
-has a schedule; a rule that refuses ends the command with Nova's sentence and exit code 2. An update replaces
+has a schedule; an update lists `changes`, which of `statement` (or `notebook`), `schedule`, `params` and
+`options` it would change (an empty list: nothing); a rule that refuses ends the command with Nova's sentence
+and exit code 2. An update replaces
 what the file says (`params` and `options` left out go back to their defaults); the group of an existing
 pipeline cannot change. The answer on stdout is `{"action": "created" | "updated" | "would-create" |
-"would-update", "name": ...}`, and `"nextRuns": [...]` on a dry run of a scheduled file. `-f` can also name a directory: every `.json`, `.yaml` and `.yml` file directly
+"would-update", "name": ...}`, `"changes": [...]` on a dry run of an update, and `"nextRuns": [...]` on a dry run of a scheduled file. `-f` can also name a directory: every `.json`, `.yaml` and `.yml` file directly
 inside it is applied in name order, one answer line per file; all files are read first, so a bad file or two
 files with one pipeline name write nothing.
 
