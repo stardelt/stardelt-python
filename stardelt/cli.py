@@ -22,7 +22,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, login, mcp, runs, shortcuts, skill, statements
+from stardelt import api, apply, bundle, login, mcp, runs, shortcuts, skill, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -91,6 +91,11 @@ def _parser():
     )
     serve.add_argument("--no-sql", action="store_true", help="leave out the guarded SQL tools sql_read and sql_explain")
     server_commands.add_parser("config", help="print how to register the server in an MCP client")
+    package = commands.add_parser("bundle", help="work with a bundle: a directory in Git that describes what a team publishes")
+    package_commands = package.add_subparsers(dest="bundle_command", required=True)
+    check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
+    check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
+    check.add_argument("-t", "--target", help="check this target only")
     advice = commands.add_parser("skill", help="print the agent skill (SKILL.md); with --write DIR install it")
     advice.add_argument("--write", metavar="DIR", help="write DIR/stardelt/SKILL.md, for example .claude/skills")
     return parser
@@ -216,6 +221,18 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
 
     if args.command == "mcp" and args.mcp_command == "config":
         stdout.write(mcp.config_text((args.host or environ.get("STARDELT_NOVA_URL", "")).strip()))
+        return OK
+
+    if args.command == "bundle":
+        problems, warnings, resolved = bundle.validate(args.directory, args.target)
+        for warning in warnings:
+            stderr.write(f"stardelt: warning: {warning}\n")
+        for where, message in problems:
+            stderr.write(f"stardelt: {where}: {message}\n")
+        if problems:
+            return USAGE
+        for name, (mode, pipelines) in resolved.items():
+            stdout.write(f"{name} ({mode}): {', '.join(pipelines)}\n")
         return OK
 
     if args.command == "skill":
