@@ -192,6 +192,7 @@ stardelt run etl nyc_taxi --wait                                  # start a pipe
 stardelt skill --write .claude/skills                        # install the agent skill (SKILL.md) for an AI assistant; without --write it prints it
 stardelt bundle init shop --name shop-etl --group shop             # write a small bundle that passes validate
 stardelt bundle summary pipelines/ -t prod                        # which commit each pipeline of the target runs, who deployed it, was it changed since
+stardelt bundle run pipelines/ -t dev                            # start what the dev deploy left on the stage and wait for each run
 stardelt bundle destroy pipelines/ -t dev                        # list what the dev deploy put on the stage; add --yes to remove it
 stardelt bundle generate etl daily pipelines/                  # write a pipeline made in the interface into the bundle: its file and its SQL file
 stardelt bundle validate pipelines/ -t prod                      # check a bundle (bundle.yaml + pipeline files) offline: no host, no sign-in
@@ -223,6 +224,11 @@ overwrite it. A plan still lists everything it would do, so a pull request check
 `bundle summary -t TARGET` shows what a deploy of that target left on the stage, one JSON line per pipeline in name order: the `name`
 and, when Nova knows them, the `revision` (Git commit) it was deployed from, `deployedBy`, `deployedAt` and `modified` (true when
 someone changed the pipeline after the deploy). It reads only; a `development` target shows only your own `dev-<your name>-` ones.
+`bundle run -t TARGET` starts the pipelines an earlier deploy of that target left on the stage (the ones `summary` lists; in a
+`development` target only your own, which you name without the `dev-<your name>-` prefix) one after the other and waits for each: a
+JSON line `{"action": "ran", "name", "runId", "state"}` per run, plus `failedTasks` when tasks failed. `--only NAME` runs one,
+`--timeout SECONDS` gives up waiting (the run keeps going) and `--interval` sets how often it looks. The first run that does not
+end `success` stops the rest and the exit code is `1`; nothing is deployed by it, so `bundle deploy` first.
 `bundle destroy -t TARGET` empties a stage: it lists as `would-delete` every pipeline an earlier deploy of this bundle target
 stamped (in a `development` target only your own `dev-<your name>-` ones) and removes them, as `deleted`, only when you add `--yes`.
 A pipeline made by hand, or stamped by another bundle or target, is never touched, and the files of the bundle stay.

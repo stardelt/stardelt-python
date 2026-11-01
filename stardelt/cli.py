@@ -121,6 +121,14 @@ def _parser():
     )
     show.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     show.add_argument("-t", "--target", required=True, help="the target to show (a name under targets in bundle.yaml)")
+    start = package_commands.add_parser(
+        "run", help="start the pipelines a deploy of one target left on the stage and wait for each; stops at the first that fails"
+    )
+    start.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
+    start.add_argument("-t", "--target", required=True, help="the target whose pipelines to run (a name under targets in bundle.yaml)")
+    start.add_argument("--only", metavar="NAME", help="run only this pipeline (its name in the bundle, without the dev- prefix)")
+    start.add_argument("--timeout", type=int, default=0, help="give up waiting for a run after N seconds (0: no limit); the run is not stopped")
+    start.add_argument("--interval", type=int, default=5, help="seconds between two looks at a run (default 5)")
     remove = package_commands.add_parser(
         "destroy", help="remove what a deploy of one target put on the stage; lists it first, removes only with --yes"
     )
@@ -378,6 +386,16 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             if not problems and not rows:
                 stderr.write("stardelt: nothing is deployed from this bundle target\n")
             return USAGE if problems else OK
+        if args.command == "bundle" and args.bundle_command == "run":
+            problems, results = bundle.run(nova, args.directory, args.target, only=args.only, timeout=args.timeout or None, interval=args.interval)
+            for result in results:
+                stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+            for where, message in problems:
+                stderr.write(f"stardelt: {where}: {message}\n")
+            ended_badly = [result for result in results if result["state"] != "success"]
+            if ended_badly:
+                stderr.write(f"stardelt: {ended_badly[0]['name']} ended {ended_badly[0]['state']}\n")
+            return USAGE if problems else (ERROR if ended_badly else OK)
         if args.command == "bundle" and args.bundle_command == "destroy":
             problems, results = bundle.destroy(nova, args.directory, args.target, confirm=args.yes)
             for result in results:
