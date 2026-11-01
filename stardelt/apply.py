@@ -62,19 +62,27 @@ def load_path(path):
 def apply(nova, spec, dry_run=False):
     """Create or update the pipeline ``spec`` through ``nova`` (a ``stardelt.api.Client``).
 
-    Returns ``{"action": ..., "name": ...}`` where the action is ``created``, ``updated`` or, with
-    ``dry_run``, ``would-create`` or ``would-update`` (nothing is written then).
+    Returns ``{"action": ..., "name": ...}`` where the action is ``created`` or ``updated``. With
+    ``dry_run`` nothing is written: Nova checks the document with every rule a create runs
+    (``pipelines_validate``). A refusal is an ``ApplyError`` with Nova's sentence; an accepted document
+    answers ``would-create`` or ``would-update``, and ``nextRuns`` (the next fire times) when it has a schedule.
     """
     name = spec["name"]
+    if dry_run:
+        verdict = nova.call("pipelines_validate", body=spec)
+        if not verdict["ok"]:
+            raise ApplyError(f"{name}: {verdict['errors'][0]['message']}")
+        result = {"action": f"would-{verdict['action']}", "name": name}
+        if verdict["nextRuns"]:
+            result["nextRuns"] = verdict["nextRuns"]
+        return result
     found = [p for p in nova.call("pipelines_list")["pipelines"] if p["name"] == name]
     if not found:
-        if not dry_run:
-            nova.call("pipelines_create", body=spec)
-        return {"action": "would-create" if dry_run else "created", "name": name}
+        nova.call("pipelines_create", body=spec)
+        return {"action": "created", "name": name}
     existing = found[0]
     if "ownerGroup" in spec and spec["ownerGroup"] != existing.get("ownerGroup"):
         raise ApplyError(f"{name} belongs to the group {existing.get('ownerGroup')}: ownerGroup cannot change")
-    if not dry_run:
-        body = {key: value for key, value in spec.items() if key not in CREATE_ONLY}
-        nova.call("pipelines_update", path={"namespace": existing["namespace"], "name": name}, body=body)
-    return {"action": "would-update" if dry_run else "updated", "name": name}
+    body = {key: value for key, value in spec.items() if key not in CREATE_ONLY}
+    nova.call("pipelines_update", path={"namespace": existing["namespace"], "name": name}, body=body)
+    return {"action": "updated", "name": name}
