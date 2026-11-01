@@ -369,6 +369,13 @@
       "query_params": [],
       "body": true
     },
+    "pipelines_validate": {
+      "method": "POST",
+      "path": "/api/pipelines/validate",
+      "path_params": [],
+      "query_params": [],
+      "body": true
+    },
     "query_log_detail": {
       "method": "GET",
       "path": "/api/query-log/{id}",
