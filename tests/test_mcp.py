@@ -58,7 +58,7 @@ def test_the_default_tools_are_read_only_and_exist_in_the_contract():
         assert name in operations and operations[name]["method"] == "GET", name
     srv, _ = server()
     tools = {t["name"]: t for t in srv.handle(rpc("tools/list"))["result"]["tools"]}
-    assert set(tools) == set(mcp.DEFAULT_TOOLS) | {"sql_read", "sql_explain"}
+    assert set(tools) == set(mcp.DEFAULT_TOOLS) | {"sql_read", "sql_explain", "catalog_tree", "describe_table"}
     assert "query_run" not in tools
     assert all(t["annotations"]["readOnlyHint"] is True for t in tools.values())
     assert tools["pipelines_get"]["inputSchema"]["required"] == ["namespace", "name"]
