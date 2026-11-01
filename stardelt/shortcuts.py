@@ -7,7 +7,7 @@ the path parameters follow the verb in the order of the path; options (``-q``, `
 ``--host``) are the ones of ``stardelt api``.
 """
 
-COMMANDS = {"whoami", "sql", "api", "mcp", "apply", "skill"}
+COMMANDS = {"whoami", "sql", "api", "mcp", "apply", "skill", "bundle"}
 
 
 def _split(operation_id):
