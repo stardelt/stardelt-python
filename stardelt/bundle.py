@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from stardelt import api, apply
+from stardelt import api, apply, runs
 
 KEYS = {"bundle", "variables", "include", "files", "requires", "targets"}
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
@@ -473,6 +473,46 @@ def summary(nova, directory, target):
                 row[key] = stamp[key]
         rows.append(row)
     return [], rows
+
+
+def run(nova, directory, target, only=None, timeout=None, interval=5):
+    """Start the pipelines an earlier deploy of ``target`` left on the stage, one after the other, and wait for each:
+    ``(problems, results)``.
+
+    The pipelines are the ones ``summary`` lists (stamped with this bundle's name and this target; in a ``development``
+    target only the caller's own). ``only`` names one of them, with or without the ``dev-<user>-`` prefix. Each result is
+    ``{"action": "ran", "name", "runId", "state"}`` (plus ``failedTasks`` when tasks failed). The first run that does not end
+    ``success`` stops the rest. ``timeout`` (seconds, default no limit) gives up waiting for a run, which keeps going.
+    """
+    problems, _, resolved = validate(directory, target)
+    if problems:
+        return problems, []
+    mode = resolved[target][0]
+    user = nova.me().get("user")
+    if mode == "development" and not user:
+        return [(target, "sign in first: a development target runs only your own pipelines")], []
+    prefix = f"dev-{_slug(user)}-" if mode == "development" else ""
+    found = sorted(_deployed(nova, provenance(directory, target)["bundle"], target, mode, user), key=lambda p: p["name"])
+    if only is not None:
+        found = [p for p in found if p["name"] in (only, prefix + only)]
+        if not found:
+            return [(target, f"{only}: no pipeline of this bundle target is deployed under that name; `stardelt bundle summary` lists them")], []
+    if not found:
+        return [(target, "nothing is deployed from this bundle target: run `stardelt bundle deploy` first")], []
+    results = []
+    for pipeline in found:
+        try:
+            ended, tasks = runs.start(nova, pipeline["namespace"], pipeline["name"], wait=True, timeout=timeout, interval=interval)
+        except runs.RunError as err:
+            return [(target, f"{pipeline['name']}: {err}")], results
+        row = {"action": "ran", "name": pipeline["name"], "runId": ended["runId"], "state": ended["state"]}
+        failed = [task["taskId"] for task in tasks if task["state"] == "failed"]
+        if failed:
+            row["failedTasks"] = failed
+        results.append(row)
+        if ended["state"] != "success":
+            break
+    return [], results
 
 
 def destroy(nova, directory, target, confirm=False):
