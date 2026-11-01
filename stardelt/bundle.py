@@ -6,6 +6,7 @@ principal is ready or a notebook version exists); it catches what a pull request
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -219,17 +220,45 @@ def render(directory, target, user=None):
     return problems, mode, ([] if problems else specs)
 
 
+def _revision(root):
+    """The commit ``root`` is at (40 hex digits, with ``-dirty`` appended when files have uncommitted changes), or
+    ``None`` when ``root`` is not in a Git checkout or ``git`` is not there."""
+    def git(*args):
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, check=False)
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    try:
+        commit = git("rev-parse", "HEAD")
+        if not commit or not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+            return None
+        return commit + ("-dirty" if git("status", "--porcelain") else "")
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def provenance(directory, target):
+    """What a deploy tells Nova about where its pipelines came from: ``{bundle, target[, revision]}``."""
+    root = Path(directory)
+    name = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))["bundle"]["name"]
+    revision = _revision(root)
+    return {"bundle": name, "target": target, **({"revision": revision} if revision else {})}
+
+
 def deploy(nova, directory, target, dry_run=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
     ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
     ``--dry-run`` of ``apply``); when anything is refused nothing is written and the refusals are the problems.
     ``results`` are the answers of ``apply``: ``would-create`` / ``would-update`` for a plan, ``created`` /
-    ``updated`` for a deploy. There is no deployment record and nothing is removed that the bundle no longer names.
+    ``updated`` for a deploy. Every pipeline carries the bundle's name, the target and the Git commit of the bundle
+    directory (``provenance``), which Nova stamps on it. There is no deployment record and nothing is removed that
+    the bundle no longer names.
     """
     problems, _, specs = render(directory, target, nova.me().get("user"))
     if problems:
         return problems, []
+    stamp = provenance(directory, target)
+    specs = [{**spec, "provenance": stamp} for spec in specs]
     results, refused = [], []
     for spec in specs:
         try:
