@@ -32,12 +32,12 @@ The platform's notebook image installs a **pinned** release of this library; a p
 notebook can install the same pin:
 
 ```bash
-pip install "stardelt @ git+https://github.com/stardelt/stardelt-python@v0.1.0"
+pip install "stardelt @ git+https://github.com/stardelt/stardelt-python@v0.2.0"
 ```
 
 ## Releases
 
-Semantic versions, tagged (`v0.1.0`). The platform pins a **release**, never a branch: a
+Semantic versions, tagged (`v0.2.0`). The package is not on PyPI: install a tag from Git, as above. `v0.2.0` is the first release that contains the `stardelt` command line (`stardelt login`, `stardelt bundle ...`). The platform pins a **release**, never a branch: a
 moving tag is not an upgrade path. A release states the platform versions it was tested
 against (the table above).
 
