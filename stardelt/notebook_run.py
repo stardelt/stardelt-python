@@ -16,12 +16,17 @@ Everything else comes from the contract the pipeline's `sql` tasks already use:
     REQUESTS_CA_BUNDLE       the internal CA that signs the engine's certificate
     PIPELINE_*               the pipeline principal's credentials (``stardelt._token()``)
     STARDELT_QUERY_IDS       file of statement ids to cancel on stop (default /tmp/stardelt-query-ids)
+    NOTEBOOK_KERNEL_TIMEOUT  seconds papermill waits for the kernel to start (default 180, 30 to 900)
     STARDELT_PAPERMILL       the papermill executable (default ``papermill``; tests only)
 
 ``python -m stardelt.notebook_run`` downloads the notebook to /tmp/in.ipynb, runs papermill in a
 process group of its own, and uploads /tmp/out.ipynb — after a failure too, because papermill
 records the failing cell there. It exits with papermill's code, 143 when a stop (SIGTERM)
 interrupted the run, and 2 for a contract error.
+
+A kernel that does not answer within the timeout (a busy node) is not the notebook's fault: the
+wrapper says so in one sentence and starts papermill once more after a short wait; a second
+timeout ends the task with papermill's exit code. Any other failure is never retried.
 
 A stop deletes the pod, which kills the kernel but NOT the statement Trino is running (it keeps
 going for about five minutes, spike #267). Before exiting, the wrapper cancels every statement id
@@ -39,6 +44,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import requests
@@ -50,6 +56,12 @@ log = logging.getLogger("stardelt.notebook_run")
 PATH_IN = "/tmp/in.ipynb"
 PATH_OUT = "/tmp/out.ipynb"
 DEFAULT_QUERY_IDS = "/tmp/stardelt-query-ids"
+
+KERNEL_TIMEOUT_DEFAULT = 180
+KERNEL_TIMEOUT_MIN = 30
+KERNEL_TIMEOUT_MAX = 900
+KERNEL_RETRY_WAIT_SECONDS = 20
+KERNEL_MARKER = "Kernel didn't respond in"
 
 DOWNLOAD_LIMIT = 10 * 1024 * 1024
 UPLOAD_LIMIT = 20 * 1024 * 1024
@@ -133,13 +145,31 @@ def parameters():
     return merged
 
 
-def build_command(params):
+def kernel_timeout():
+    """Seconds papermill waits for the kernel (``NOTEBOOK_KERNEL_TIMEOUT``), or a ``ContractError``."""
+    raw = os.environ.get("NOTEBOOK_KERNEL_TIMEOUT", "").strip()
+    if not raw:
+        return KERNEL_TIMEOUT_DEFAULT
+    try:
+        seconds = int(raw)
+    except ValueError:
+        seconds = 0
+    if not KERNEL_TIMEOUT_MIN <= seconds <= KERNEL_TIMEOUT_MAX:
+        raise ContractError(
+            f"NOTEBOOK_KERNEL_TIMEOUT must be a whole number of seconds from "
+            f"{KERNEL_TIMEOUT_MIN} to {KERNEL_TIMEOUT_MAX}."
+        )
+    return seconds
+
+
+def build_command(params, start_timeout=KERNEL_TIMEOUT_DEFAULT):
     """The papermill argument list (no shell): ``-r`` pairs sorted, then the CLI flags."""
     executable = os.environ.get("STARDELT_PAPERMILL", "").strip() or "papermill"
     command = [executable, PATH_IN, PATH_OUT]
     for name in sorted(params):
         command += ["-r", name, str(params[name])]
     command += ["--no-progress-bar", "--log-output", "--kernel", "python3"]
+    command += ["--start-timeout", str(start_timeout)]
     return command
 
 
@@ -266,6 +296,22 @@ def _wait(child, stopping):
                 return child.wait()
 
 
+def _tee_stderr(child, kernel_stuck):
+    """Copy papermill's stderr to ours line by line; set ``kernel_stuck`` on a kernel-start timeout."""
+    for line in child.stderr:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+        if KERNEL_MARKER in line:
+            kernel_stuck.set()
+
+
+def _pause(seconds, stopping):
+    """Sleep up to ``seconds``, a second at a time, and return early once a stop was requested."""
+    deadline = time.monotonic() + seconds
+    while not stopping() and time.monotonic() < deadline:
+        time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+
+
 def main():
     """Run one notebook task; return the exit code the pod should carry."""
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(message)s")
@@ -299,10 +345,36 @@ def main():
             # The helper only records ids when the file is named; the wrapper always needs them,
             # so the child gets the path even when the DAG did not set it.
             environment.setdefault("STARDELT_QUERY_IDS", _query_ids_path())
-            child = subprocess.Popen(
-                build_command(params), start_new_session=True, env=environment
-            )
-            rc = _wait(child, lambda: stopping)
+            timeout = kernel_timeout()
+            attempts = 0
+            while True:
+                attempts += 1
+                kernel_stuck = threading.Event()
+                child = subprocess.Popen(
+                    build_command(params, timeout),
+                    start_new_session=True,
+                    env=environment,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    errors="replace",
+                )
+                reader = threading.Thread(target=_tee_stderr, args=(child, kernel_stuck), daemon=True)
+                reader.start()
+                rc = _wait(child, lambda: stopping)
+                reader.join(timeout=5)
+                if rc == 0 or stopping or not kernel_stuck.is_set():
+                    break
+                log.error(
+                    "the notebook pod started but its kernel did not answer within %d seconds; "
+                    "the node may be busy",
+                    timeout,
+                )
+                if attempts >= 2:
+                    break
+                log.info("trying once more in %d s", KERNEL_RETRY_WAIT_SECONDS)
+                _pause(KERNEL_RETRY_WAIT_SECONDS, lambda: stopping)
+                if stopping:
+                    break
         except ContractError as exc:
             log.error("%s", exc)
             return 2
