@@ -44,6 +44,19 @@ ids = os.environ.get("STARDELT_QUERY_IDS")
 if ids:
     with open(ids, "w", encoding="utf-8") as handle:
         handle.write("query-1\\nquery-2\\n")
+count_path = os.environ.get("FAKE_PAPERMILL_COUNT")
+runs = 1
+if count_path:
+    try:
+        with open(count_path, encoding="utf-8") as handle:
+            runs = int(handle.read()) + 1
+    except OSError:
+        pass
+    with open(count_path, "w", encoding="utf-8") as handle:
+        handle.write(str(runs))
+if runs <= int(os.environ.get("FAKE_PAPERMILL_KERNEL_FAILS", "0")):
+    sys.stderr.write("RuntimeError: Kernel didn't respond in 60 seconds\\n")
+    sys.exit(1)
 with open(out_path, "w", encoding="utf-8") as handle:
     json.dump({"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5, "argv": args}, handle)
 delay = float(os.environ.get("FAKE_PAPERMILL_SLEEP", "0"))
@@ -156,6 +169,7 @@ def task(tmp_path, monkeypatch, store, papermill):
     """A pod with the contract of the ticket, its two paths under tmp_path."""
     monkeypatch.setattr(notebook_run, "PATH_IN", str(tmp_path / "in.ipynb"))
     monkeypatch.setattr(notebook_run, "PATH_OUT", str(tmp_path / "out.ipynb"))
+    monkeypatch.setattr(notebook_run, "KERNEL_RETRY_WAIT_SECONDS", 0)
     monkeypatch.setenv("NOTEBOOK_GET_URL", f"{store.url}/in.ipynb?X-Amz-Signature=url-canary")
     monkeypatch.setenv("NOTEBOOK_PUT_URL", f"{store.url}/out.ipynb?X-Amz-Signature=url-canary")
     monkeypatch.setenv("NOTEBOOK_RUN_DATE", "2026-10-21")
@@ -169,6 +183,9 @@ def task(tmp_path, monkeypatch, store, papermill):
         "PIPELINE_TOKEN_URL",
         "FAKE_PAPERMILL_RC",
         "FAKE_PAPERMILL_SLEEP",
+        "FAKE_PAPERMILL_COUNT",
+        "FAKE_PAPERMILL_KERNEL_FAILS",
+        "NOTEBOOK_KERNEL_TIMEOUT",
     ):
         monkeypatch.delenv(name, raising=False)
     return tmp_path
@@ -260,6 +277,7 @@ def test_papermill_args_use_r_and_are_sorted(monkeypatch):
         "-r", "a", "0123",
         "-r", "b", "2",
         "--no-progress-bar", "--log-output", "--kernel", "python3",
+        "--start-timeout", "180",
     ]
 
 
@@ -270,6 +288,70 @@ def test_exit_code_is_propagated_and_output_uploaded_anyway(task, store, monkeyp
     path, content_type, body = store.puts[0]
     assert content_type == "application/x-ipynb+json"
     assert json.loads(body)["cells"] == []  # the executed notebook as far as it ran
+
+
+# the kernel start ----------------------------------------------------------
+
+KERNEL_SENTENCE = (
+    "the notebook pod started but its kernel did not answer within 180 seconds; the node may be busy"
+)
+
+
+def test_kernel_timeout_default_and_bounds(monkeypatch):
+    monkeypatch.delenv("NOTEBOOK_KERNEL_TIMEOUT", raising=False)
+    assert notebook_run.kernel_timeout() == 180
+    for text, seconds in (("300", 300), ("30", 30), ("900", 900)):
+        monkeypatch.setenv("NOTEBOOK_KERNEL_TIMEOUT", text)
+        assert notebook_run.kernel_timeout() == seconds
+    for bad in ("29", "901", "abc", "1.5", "-5"):
+        monkeypatch.setenv("NOTEBOOK_KERNEL_TIMEOUT", bad)
+        with pytest.raises(notebook_run.ContractError):
+            notebook_run.kernel_timeout()
+
+
+def test_the_kernel_timeout_reaches_papermill(task, store, monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_KERNEL_TIMEOUT", "240")
+    assert notebook_run.main() == 0
+    argv = json.loads(store.puts[0][2])["argv"]
+    assert argv[argv.index("--start-timeout") + 1] == "240"
+
+
+def test_a_bad_kernel_timeout_exits_2(task, monkeypatch, caplog):
+    monkeypatch.setenv("NOTEBOOK_KERNEL_TIMEOUT", "7")
+    assert notebook_run.main() == 2
+    assert "NOTEBOOK_KERNEL_TIMEOUT must be a whole number of seconds from 30 to 900." in caplog.text
+
+
+def test_a_kernel_start_timeout_is_retried_once_and_named(task, store, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="stardelt.notebook_run")
+    count = task / "count"
+    monkeypatch.setenv("FAKE_PAPERMILL_COUNT", str(count))
+    monkeypatch.setenv("FAKE_PAPERMILL_KERNEL_FAILS", "1")
+    assert notebook_run.main() == 0
+    assert count.read_text() == "2"
+    assert KERNEL_SENTENCE in caplog.text
+    assert len(store.puts) == 1
+
+
+def test_a_second_kernel_timeout_ends_the_task_after_two_runs(task, store, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="stardelt.notebook_run")
+    count = task / "count"
+    monkeypatch.setenv("FAKE_PAPERMILL_COUNT", str(count))
+    monkeypatch.setenv("FAKE_PAPERMILL_KERNEL_FAILS", "5")
+    assert notebook_run.main() == 1
+    assert count.read_text() == "2"
+    assert sum(KERNEL_SENTENCE in message for message in caplog.messages) == 2
+    assert store.puts == []
+
+
+def test_a_failing_cell_is_not_retried(task, store, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="stardelt.notebook_run")
+    count = task / "count"
+    monkeypatch.setenv("FAKE_PAPERMILL_COUNT", str(count))
+    monkeypatch.setenv("FAKE_PAPERMILL_RC", "7")
+    assert notebook_run.main() == 7
+    assert count.read_text() == "1"
+    assert KERNEL_SENTENCE not in caplog.text
 
 
 # stop ----------------------------------------------------------------------
