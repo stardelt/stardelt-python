@@ -177,7 +177,7 @@ when you are in several, pass `group=`. The call prints and returns
 
 ## Command line
 
-`pip install stardelt` also installs a `stardelt` command, a thin client for shells, CI and
+Installing the package (see the README at the root of the repository; it is not on PyPI) also installs a `stardelt` command, a thin client for shells, CI and
 agents over Nova's public API. It needs a Nova URL and a sign-in:
 
 ```bash
