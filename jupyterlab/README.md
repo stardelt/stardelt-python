@@ -8,6 +8,34 @@ This extension is composed of a Python package named `stardelt_jupyterlab`
 for the server extension and a NPM package named `@stardelt/jupyterlab`
 for the frontend extension.
 
+## What it adds
+
+- **Themes**: `stardelt Graphite` (dark, the default) and `stardelt Silver`
+  (light). Pick one under _Settings → Theme_.
+
+  | stardelt Graphite                       | stardelt Silver                     |
+  | --------------------------------------- | ----------------------------------- |
+  | ![stardelt Graphite](docs/graphite.png) | ![stardelt Silver](docs/silver.png) |
+
+- **Top bar**: `◂ stardelt` links back to Nova, then the user and the runtime
+  label. The server extension puts them into the page config from the
+  environment, so start JupyterLab with:
+
+  ```bash
+  STARDELT_NOVA_URL=https://alpha.dev.stardelt.io STARDELT_RUNTIME=2026.11 jupyter lab
+  ```
+
+  `stardeltNovaUrl` is empty when `STARDELT_NOVA_URL` is unset, and the link is
+  then left out; the same for the runtime label and `STARDELT_RUNTIME`.
+
+## Default theme
+
+`overrides.json` in this directory selects `stardelt Graphite` for a new user.
+It only takes effect where it is copied into the JupyterLab settings
+directory. The notebook image installs it as
+`$CONDA_DIR/share/jupyter/lab/settings/overrides.json` (stardelt-platform);
+this package does not install it.
+
 ## Requirements
 
 - JupyterLab >= 4.0.0

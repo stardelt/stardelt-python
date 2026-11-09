@@ -3,3 +3,37 @@
 
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
+
+/* The stardelt bar in the top area. Theme variables only: it follows the
+   stardelt Graphite and stardelt Silver themes. */
+.stardelt-TopBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
+  padding: 0 12px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size1);
+  border-left: 1px solid var(--jp-border-color2);
+}
+
+.stardelt-TopBar-nova {
+  color: var(--jp-brand-color1);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.stardelt-TopBar-nova:hover {
+  color: var(--jp-brand-color0);
+  text-decoration: underline;
+}
+
+.stardelt-TopBar-user {
+  color: var(--jp-ui-font-color1);
+}
+
+.stardelt-TopBar-runtime {
+  color: var(--jp-ui-font-color3);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+}

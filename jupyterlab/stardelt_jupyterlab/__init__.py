@@ -1,3 +1,5 @@
+import os
+
 try:
     from ._version import __version__
 except ImportError:
@@ -7,7 +9,6 @@ except ImportError:
     import warnings
     warnings.warn("Importing 'stardelt_jupyterlab' outside a proper installation.")
     __version__ = "dev"
-from .routes import setup_route_handlers
 
 
 def _jupyter_labextension_paths():
@@ -24,13 +25,15 @@ def _jupyter_server_extension_points():
 
 
 def _load_jupyter_server_extension(server_app):
-    """Registers the API handler to receive HTTP requests from the frontend extension.
+    """Put the stardelt values the frontend reads into the page config.
 
     Parameters
     ----------
     server_app: jupyterlab.labapp.LabApp
         JupyterLab application instance
     """
-    setup_route_handlers(server_app.web_app)
+    page_config = server_app.web_app.settings.setdefault('page_config_data', {})
+    page_config['stardeltNovaUrl'] = os.environ.get('STARDELT_NOVA_URL', '')
+    page_config['stardeltRuntime'] = os.environ.get('STARDELT_RUNTIME', '')
     name = "stardelt_jupyterlab"
     server_app.log.info(f"Registered {name} server extension")

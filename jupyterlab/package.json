@@ -11,7 +11,7 @@
     "bugs": {
         "url": "https://github.com/stardelt/stardelt-python/issues"
     },
-    "license": "BSD-3-Clause",
+    "license": "Apache-2.0",
     "author": "stardelt",
     "files": [
         "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf}",
@@ -54,8 +54,10 @@
     },
     "dependencies": {
         "@jupyterlab/application": "^4.0.0",
+        "@jupyterlab/apputils": "^4.0.0",
         "@jupyterlab/coreutils": "^6.0.0",
-        "@jupyterlab/services": "^7.0.0"
+        "@jupyterlab/services": "^7.0.0",
+        "@lumino/widgets": "^2.0.0"
     },
     "devDependencies": {
         "@eslint/js": "^9.0.0",

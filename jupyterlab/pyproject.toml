@@ -5,11 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "stardelt_jupyterlab"
 readme = "README.md"
-license = "BSD-3-Clause"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 classifiers = [
     "Framework :: Jupyter",
+    "License :: OSI Approved :: Apache Software License",
     "Framework :: Jupyter :: JupyterLab",
     "Framework :: Jupyter :: JupyterLab :: 4",
     "Framework :: Jupyter :: JupyterLab :: Extensions",
@@ -54,6 +55,8 @@ exclude = [".github", "binder"]
 "stardelt_jupyterlab/labextension" = "share/jupyter/labextensions/@stardelt/jupyterlab"
 "install.json" = "share/jupyter/labextensions/@stardelt/jupyterlab/install.json"
 "jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
+"style/graphite.css" = "share/jupyter/labextensions/@stardelt/jupyterlab/themes/@stardelt/jupyterlab/graphite.css"
+"style/silver.css" = "share/jupyter/labextensions/@stardelt/jupyterlab/themes/@stardelt/jupyterlab/silver.css"
 
 [tool.hatch.build.hooks.version]
 path = "stardelt_jupyterlab/_version.py"
