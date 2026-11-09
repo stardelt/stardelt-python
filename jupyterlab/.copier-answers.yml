@@ -1,0 +1,16 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v4.6.5
+_src_path: https://github.com/jupyterlab/extension-template
+advanced: false
+author_email: ''
+author_name: stardelt
+has_ai_rules: false
+has_binder: false
+has_settings: false
+kind: frontend-and-server
+labextension_name: '@stardelt/jupyterlab'
+project_short_description: 'stardelt inside JupyterLab: theme, top bar, catalog, publish'
+python_name: stardelt_jupyterlab
+repository: https://github.com/stardelt/stardelt-python
+test: true
+
