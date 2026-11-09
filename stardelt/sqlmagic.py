@@ -17,7 +17,14 @@ ALIAS = "warehouse"
 
 
 def _creator():
-    return stardelt._connect(live=True)
+    try:
+        return stardelt._connect(live=True)
+    except RuntimeError as exc:
+        # Off the platform there is no Trino to reach: point at the call that does work
+        # from a laptop, through Nova's statement API.
+        if not stardelt._on_platform():
+            raise RuntimeError(f"{exc} On a laptop, use `stardelt.sql(...)` instead.") from exc
+        raise
 
 
 def connect():
