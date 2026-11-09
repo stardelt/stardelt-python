@@ -35,6 +35,24 @@ notebook can install the same pin:
 pip install "stardelt @ git+https://github.com/stardelt/stardelt-python@v0.2.0"
 ```
 
+## On a laptop
+
+A local kernel (VS Code, Jupyter) reaches the warehouse through Nova's statement API with
+the sign-in you store once — no workspace needed:
+
+```bash
+stardelt login --host https://<nova>
+```
+
+```python
+import stardelt
+
+stardelt.sql("SELECT * FROM warehouse.demo.trips LIMIT 10")   # up to 100 000 rows
+```
+
+`stardelt.spark()` and `stardelt.write_df()` need the platform: connect VS Code to your
+workspace (Nova → Profile → VS Code).
+
 ## Releases
 
 Semantic versions, tagged (`v0.2.0`). The package is not on PyPI: install a tag from Git, as above. `v0.2.0` is the first release that contains the `stardelt` command line (`stardelt login`, `stardelt bundle ...`). The platform pins a **release**, never a branch: a

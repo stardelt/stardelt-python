@@ -599,6 +599,8 @@ def fake_spark(monkeypatch):
     monkeypatch.setattr(stardelt, "_SPARK_SESSION", None)
     monkeypatch.setattr(stardelt, "_SPARK_TOKEN", None)
     monkeypatch.setattr(stardelt, "_SPARK_REMOTE", None)
+    # spark() is platform-only: this fixture is a hub pod.
+    monkeypatch.setenv("TRINO_URL", "https://trino.example:8443")
     monkeypatch.setenv("SPARK_REMOTE", "sc://spark.example:15002")
     monkeypatch.delenv("STARDELT_CATALOG_URI", raising=False)
     monkeypatch.delenv("STARDELT_S3_ENDPOINT", raising=False)

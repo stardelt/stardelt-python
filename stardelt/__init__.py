@@ -36,6 +36,7 @@ import re
 import sys
 import time
 import uuid
+import warnings
 from urllib.parse import urlsplit
 
 import pandas as pd
@@ -220,6 +221,41 @@ def _connect(live=False):
     )
 
 
+def _on_platform() -> bool:
+    """Whether this kernel runs on the platform: a hub pod or a pipeline pod, not a laptop."""
+    return bool(os.environ.get("TRINO_URL", "").strip())
+
+
+# One HTTP session for the laptop path: the token is renewed through it, and Nova is
+# reached by the same connection for every statement of the kernel.
+_LOCAL_SESSION = None
+
+
+def _local_client():
+    """A Nova client for the stored sign-in, or ``None`` when there is neither a host nor a sign-in.
+
+    The host is ``STARDELT_NOVA_URL`` first (a workspace or CI) and the host kept by
+    ``stardelt login`` second. The token is ``STARDELT_TOKEN`` when set, otherwise the stored
+    access token, renewed through the same session (as the command line does).
+    """
+    global _LOCAL_SESSION
+
+    from stardelt import api, login
+
+    host = (
+        os.environ.get("STARDELT_NOVA_URL", "") or (login.load(os.environ) or {}).get("host") or ""
+    ).strip()
+    if not host:
+        return None
+    if _LOCAL_SESSION is None:
+        _LOCAL_SESSION = requests.Session()
+    session = _LOCAL_SESSION
+    token = os.environ.get("STARDELT_TOKEN", "").strip()
+    if not token:
+        token = lambda: login.fresh_token(os.environ, session)  # noqa: E731
+    return api.Client(base_url=host, token=token, session=session)
+
+
 def _one_line(exc):
     text = str(exc).strip().splitlines()
     return text[0] if text else type(exc).__name__
@@ -251,13 +287,40 @@ def _record_query_id(cur):
 
 
 def sql(query, params=None):
-    """Run ``query`` as the signed-in hub user, return the rows as a DataFrame.
+    """Run ``query`` as the signed-in user, return the rows as a DataFrame.
+
+    On the platform (a hub or pipeline pod) the statement goes to Trino with the pod's
+    token. On a laptop it goes through Nova's statement API with the sign-in kept by
+    ``stardelt login`` — the same path as ``stardelt sql``, up to 100 000 rows.
 
     ``params`` are bound parameters for the query's ``?`` placeholders — never
     string-interpolated values, so a cell can pass user input without building
-    SQL by hand. Failures raise a one-line ``RuntimeError`` (chained to the
-    original, so the full trace is one ``__cause__`` away).
+    SQL by hand. They need the platform connection: on a laptop, pass literal values.
+    Failures raise a one-line ``RuntimeError`` (chained to the original, so the full
+    trace is one ``__cause__`` away).
     """
+    if not _on_platform():
+        from stardelt import api, statements
+
+        client = _local_client()
+        if client is None:
+            raise RuntimeError(
+                "stardelt.sql: not on the platform and not signed in — run "
+                "`stardelt login --host https://<nova>` once, or connect to your workspace."
+            )
+        if params is not None:
+            raise RuntimeError(
+                "stardelt.sql: bound parameters need the platform connection; on a laptop, pass literal values."
+            )
+        try:
+            result = statements.run(client, query)
+        except (statements.StatementError, api.StardeltApiError) as exc:
+            raise RuntimeError(f"stardelt.sql failed: {_one_line(exc)}") from exc
+        if result.truncated:
+            warnings.warn(
+                "stardelt.sql: only the first 100 000 rows came back (laptop mode).", stacklevel=2
+            )
+        return result.to_pandas()
     conn = _connect()
     try:
         cur = conn.cursor()
@@ -343,6 +406,15 @@ def _clean(value):
     return value
 
 
+def _platform_only(name):
+    """Refuse a platform-only call on a laptop, with the sentence that names the way back."""
+    if not _on_platform():
+        raise RuntimeError(
+            f"{name}: Spark and table writes run on the platform — connect VS Code to your "
+            "workspace (Nova → Profile → VS Code)."
+        )
+
+
 def write_df(df, table, mode="append", batch_rows=DEFAULT_BATCH_ROWS, bronze=False, source="notebook"):
     """Write ``df`` to ``"schema.table"`` in the warehouse, return rows written.
 
@@ -367,6 +439,7 @@ def write_df(df, table, mode="append", batch_rows=DEFAULT_BATCH_ROWS, bronze=Fal
     ``_batch_id`` (a fresh UUID per call) — and nothing else is added
     implicitly: without ``bronze`` the frame lands exactly as given.
     """
+    _platform_only("stardelt.write_df")
     if mode not in ("append", "overwrite", "create"):
         raise ValueError(
             f"stardelt.write_df: mode must be 'append', 'overwrite' or 'create', got {mode!r}."
@@ -722,6 +795,7 @@ def spark(app_name="stardelt-notebook", cluster=None):
     Keep the shared driver small: see ``stardelt.spark_tips()`` for the patterns
     that do (the cheat sheet is also in the helper's README).
     """
+    _platform_only("stardelt.spark")
     from pyspark.sql import SparkSession
 
     global _SPARK_SESSION, _SPARK_TOKEN, _SPARK_REMOTE
