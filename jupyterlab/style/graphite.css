@@ -116,8 +116,8 @@ all of MD as it is not optimized for dense, information rich UIs.
 
   --jp-border-width: 1px;
   --jp-border-color0: var(--md-grey-700, #616161);
-  --jp-border-color1: rgb(62 65 71);
-  --jp-border-color2: rgb(62 65 71);
+  --jp-border-color1: rgb(62, 65, 71);
+  --jp-border-color2: rgb(62, 65, 71);
   --jp-border-color3: var(--md-grey-900, #212121);
   --jp-inverse-border-color: var(--md-grey-600, #757575);
   --jp-border-radius: 2px;
@@ -148,9 +148,9 @@ all of MD as it is not optimized for dense, information rich UIs.
 
   /* Defaults use Material Design specification */
   --jp-ui-font-color0: rgba(255, 255, 255, 1);
-  --jp-ui-font-color1: rgb(232 234 237);
-  --jp-ui-font-color2: rgb(176 181 189);
-  --jp-ui-font-color3: rgb(142 148 158);
+  --jp-ui-font-color1: rgb(232, 234, 237);
+  --jp-ui-font-color2: rgb(176, 181, 189);
+  --jp-ui-font-color3: rgb(142, 148, 158);
 
   /*
    * Use these against the brand/accent/warn/error colors.
@@ -189,7 +189,7 @@ all of MD as it is not optimized for dense, information rich UIs.
 
   /* Defaults use Material Design specification */
   --jp-content-font-color0: rgba(255, 255, 255, 1);
-  --jp-content-font-color1: rgb(232 234 237);
+  --jp-content-font-color1: rgb(232, 234, 237);
   --jp-content-font-color2: rgba(255, 255, 255, 0.7);
   --jp-content-font-color3: rgba(255, 255, 255, 0.5);
   --jp-content-link-color: var(--md-blue-300, #64b5f6);
@@ -233,9 +233,9 @@ all of MD as it is not optimized for dense, information rich UIs.
    * theme these would go from light to dark.
    */
 
-  --jp-layout-color0: rgb(24 25 27);
-  --jp-layout-color1: rgb(31 33 36);
-  --jp-layout-color2: rgb(40 42 46);
+  --jp-layout-color0: rgb(24, 25, 27);
+  --jp-layout-color1: rgb(31, 33, 36);
+  --jp-layout-color2: rgb(40, 42, 46);
   --jp-layout-color3: var(--md-grey-700, #616161);
   --jp-layout-color4: var(--md-grey-600, #757575);
 
@@ -253,8 +253,8 @@ all of MD as it is not optimized for dense, information rich UIs.
 
   /* Brand/accent */
 
-  --jp-brand-color0: rgb(79 95 240);
-  --jp-brand-color1: rgb(122 138 255);
+  --jp-brand-color0: rgb(79, 95, 240);
+  --jp-brand-color1: rgb(122, 138, 255);
   --jp-brand-color2: var(--md-blue-300, #64b5f6);
   --jp-brand-color3: var(--md-blue-100, #bbdefb);
   --jp-brand-color4: var(--md-blue-50, #e3f2fd);
@@ -266,15 +266,15 @@ all of MD as it is not optimized for dense, information rich UIs.
   /* State colors (warn, error, success, info) */
 
   --jp-warn-color0: var(--md-orange-700, #f57c00);
-  --jp-warn-color1: rgb(252 211 77);
+  --jp-warn-color1: rgb(252, 211, 77);
   --jp-warn-color2: var(--md-orange-300, #ffb74d);
   --jp-warn-color3: var(--md-orange-100, #ffe0b2);
   --jp-error-color0: var(--md-red-700, #d32f2f);
-  --jp-error-color1: rgb(248 113 113);
+  --jp-error-color1: rgb(248, 113, 113);
   --jp-error-color2: var(--md-red-300, #e57373);
   --jp-error-color3: var(--md-red-100, #ffcdd2);
   --jp-success-color0: var(--md-green-700, #388e3c);
-  --jp-success-color1: rgb(94 230 168);
+  --jp-success-color1: rgb(94, 230, 168);
   --jp-success-color2: var(--md-green-300, #81c784);
   --jp-success-color3: var(--md-green-100, #c8e6c9);
   --jp-info-color0: var(--md-cyan-700, #0097a7);
