@@ -53,6 +53,31 @@
       ],
       "body": true
     },
+    "compute_list": {
+      "method": "GET",
+      "path": "/api/compute",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
+    "compute_start": {
+      "method": "POST",
+      "path": "/api/compute/{name}/start",
+      "path_params": [
+        "name"
+      ],
+      "query_params": [],
+      "body": false
+    },
+    "compute_stop": {
+      "method": "POST",
+      "path": "/api/compute/{name}/stop",
+      "path_params": [
+        "name"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "connections_break_glass_log": {
       "method": "GET",
       "path": "/api/connections/break-glass-log",
@@ -165,6 +190,27 @@
       "query_params": [],
       "body": false
     },
+    "lineage_graph": {
+      "method": "GET",
+      "path": "/api/lineage",
+      "path_params": [],
+      "query_params": [
+        "catalog",
+        "schema",
+        "table",
+        "depth"
+      ],
+      "body": false
+    },
+    "lineage_run_detail": {
+      "method": "GET",
+      "path": "/api/lineage/runs/{run_id}",
+      "path_params": [
+        "run_id"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "me": {
       "method": "GET",
       "path": "/api/me",
@@ -221,6 +267,16 @@
         "dryRun"
       ],
       "body": true
+    },
+    "notebooks_usage": {
+      "method": "GET",
+      "path": "/api/notebooks/{group}/{name}/usage",
+      "path_params": [
+        "group",
+        "name"
+      ],
+      "query_params": [],
+      "body": false
     },
     "notebooks_versions": {
       "method": "GET",
@@ -420,6 +476,19 @@
       "query_params": [],
       "body": true
     },
+    "runs_list": {
+      "method": "GET",
+      "path": "/api/runs",
+      "path_params": [],
+      "query_params": [
+        "limit",
+        "state",
+        "kind",
+        "group",
+        "pipeline"
+      ],
+      "body": false
+    },
     "saved_queries_create": {
       "method": "POST",
       "path": "/api/saved-queries",
@@ -440,6 +509,13 @@
       "path_params": [
         "id"
       ],
+      "query_params": [],
+      "body": false
+    },
+    "service_principals_list": {
+      "method": "GET",
+      "path": "/api/service-principals",
+      "path_params": [],
       "query_params": [],
       "body": false
     },
@@ -484,6 +560,23 @@
       "method": "POST",
       "path": "/api/statements",
       "path_params": [],
+      "query_params": [],
+      "body": true
+    },
+    "streams_list": {
+      "method": "GET",
+      "path": "/api/streams",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
+    "streams_patch": {
+      "method": "PATCH",
+      "path": "/api/streams/{namespace}/{name}",
+      "path_params": [
+        "namespace",
+        "name"
+      ],
       "query_params": [],
       "body": true
     },

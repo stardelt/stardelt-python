@@ -341,6 +341,42 @@ def test_spark_docstring_states_credential_limitation():
     assert "shared storage credential" in stardelt.spark.__doc__
 
 
+def _view(phase, endpoint="sc://trial.stardelt.svc.cluster.local:15002"):
+    return {"name": "trial", "phase": phase, "endpoint": endpoint}
+
+
+def test_remote_for_none_honours_spark_remote_and_the_default(monkeypatch):
+    monkeypatch.setenv("SPARK_REMOTE", "sc://other:15002")
+    assert stardelt._remote_for_cluster(None) == "sc://other:15002"
+    monkeypatch.delenv("SPARK_REMOTE")
+    assert stardelt._remote_for_cluster(None) == stardelt.SPARK_REMOTE_DEFAULT
+
+
+def test_remote_for_a_cluster_is_the_endpoint_nova_reports(monkeypatch):
+    monkeypatch.setattr(stardelt.compute, "get", lambda name: _view("Running"))
+    assert stardelt._remote_for_cluster("trial") == "sc://trial.stardelt.svc.cluster.local:15002"
+
+
+def test_remote_for_a_stopped_cluster_raises_cluster_stopped(monkeypatch):
+    monkeypatch.setattr(stardelt.compute, "get", lambda name: _view("Stopped"))
+    with pytest.raises(stardelt.ClusterStopped) as caught:
+        stardelt._remote_for_cluster("trial")
+    assert "stardelt.compute.start('trial')" in str(caught.value)
+
+
+def test_remote_for_a_starting_cluster_raises_runtime_error(monkeypatch):
+    monkeypatch.setattr(stardelt.compute, "get", lambda name: _view("Starting"))
+    with pytest.raises(RuntimeError, match="trial is Starting; wait until it is Running"):
+        stardelt._remote_for_cluster("trial")
+
+
+def test_cached_session_is_not_reused_for_another_remote(monkeypatch):
+    monkeypatch.setattr(stardelt, "_SPARK_TOKEN", "token-317")
+    monkeypatch.setattr(stardelt, "_SPARK_REMOTE", "sc://shared:15002")
+    monkeypatch.setattr(stardelt, "_SPARK_SESSION", object())
+    assert stardelt._cached_spark_session("token-317", "sc://trial:15002") is None
+
+
 def test_spark_tips_prints_every_row(capsys):
     stardelt.spark_tips()
     lines = capsys.readouterr().out.strip().splitlines()
@@ -562,6 +598,7 @@ def fake_spark(monkeypatch):
     monkeypatch.setitem(sys.modules, "pyspark.sql", pyspark_sql)
     monkeypatch.setattr(stardelt, "_SPARK_SESSION", None)
     monkeypatch.setattr(stardelt, "_SPARK_TOKEN", None)
+    monkeypatch.setattr(stardelt, "_SPARK_REMOTE", None)
     monkeypatch.setenv("SPARK_REMOTE", "sc://spark.example:15002")
     monkeypatch.delenv("STARDELT_CATALOG_URI", raising=False)
     monkeypatch.delenv("STARDELT_S3_ENDPOINT", raising=False)

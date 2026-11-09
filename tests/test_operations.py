@@ -57,6 +57,32 @@ def test_the_sync_script_keeps_public_operations_only_and_sorts_them(tmp_path):
     }
 
 
+def test_the_compute_operations_are_in_the_contract():
+    ops = api.operations()
+    assert ops["compute_list"] == {
+        "method": "GET", "path": "/api/compute", "path_params": [], "query_params": [], "body": False,
+    }
+    assert ops["compute_start"] == {
+        "method": "POST", "path": "/api/compute/{name}/start", "path_params": ["name"],
+        "query_params": [], "body": False,
+    }
+    assert ops["compute_stop"] == {
+        "method": "POST", "path": "/api/compute/{name}/stop", "path_params": ["name"],
+        "query_params": [], "body": False,
+    }
+
+
+def test_stardelt_compute_start_is_a_shortcut_for_the_start_operation():
+    code, out, err, session = run(
+        ["compute", "start", "trial"],
+        FakeResponse(payload={"name": "trial", "phase": "Starting"}),
+    )
+    assert (code, err) == (0, "")
+    assert json.loads(out) == {"name": "trial", "phase": "Starting"}
+    method, url, _ = session.calls[0]
+    assert (method, url) == ("POST", "https://nova.example/api/compute/trial/start")
+
+
 def client(*responses):
     session = FakeSession(*responses)
     return api.Client(base_url="https://nova.example", token="t", session=session), session
