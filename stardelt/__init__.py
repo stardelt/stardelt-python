@@ -11,6 +11,7 @@ a pandas DataFrame *into* an Iceberg table. This package is that loop, short:
     stardelt.write_df(trips, "warehouse.demo.trips_sample", mode="create")
     stardelt.publish("my.ipynb")  # a versioned copy, for scheduling
     spark = stardelt.spark()  # Spark Connect, for what does not fit write_df
+    spark = stardelt.spark(cluster="mobility")  # a team cluster; None is shared
 
 Identity comes from the pod, never from an argument: JupyterHub copies the
 signed-in user's Keycloak access token into the single-user server as
@@ -60,6 +61,8 @@ __all__ = [
     "browse",
     "spark",
     "spark_tips",
+    "compute",
+    "ClusterStopped",
     "connection",
     "ConnectionUnavailable",
 ]
@@ -98,6 +101,11 @@ CATALOG_NAME_RE = re.compile(r"^[a-z][a-z0-9]{0,39}$")
 # `_cached_spark_session`): the driver may have restarted under it.
 _SPARK_SESSION = None
 _SPARK_TOKEN = None
+
+# The session cache is keyed by token AND endpoint: a named cluster is a different
+# Connect server, and reusing the shared session there would silently run on the
+# wrong compute (internal#161 slice 6).
+_SPARK_REMOTE = None
 
 # A pipeline pod has no hub behind it: when its token ages out, the grant that issued it is
 # the only way to get another one. Renew this long before `exp` so no statement races the
@@ -464,19 +472,22 @@ def _catalog_names():
     ]
 
 
-def _cached_spark_session(token):
-    """The session `spark()` may reuse for ``token``, or ``None`` to build a new one.
+def _cached_spark_session(token, remote):
+    """The session `spark()` may reuse for ``token`` at ``remote``, or ``None`` to build a new one.
 
     A cached session is only good while the server still knows it. ``is_stopped``
     is a local client flag: after the driver restarts the client closes itself and
     every call raises ``NO_ACTIVE_SESSION``, so liveness is proved by reading
     ``version``, which is a round trip. A dead session is dropped here (best-effort
     ``stop()``, one line on stderr) and the caller builds a fresh one.
+
+    The endpoint is part of the key: a named cluster is a different Connect server,
+    and reusing the shared session there would run on the wrong compute.
     """
-    global _SPARK_SESSION
+    global _SPARK_SESSION, _SPARK_REMOTE
 
     session = _SPARK_SESSION
-    if session is None or _SPARK_TOKEN != token:
+    if session is None or _SPARK_TOKEN != token or _SPARK_REMOTE != remote:
         return None
     try:
         if session.is_stopped:
@@ -484,6 +495,7 @@ def _cached_spark_session(token):
         session.version
     except Exception:  # noqa: BLE001 - any failure here means "not usable"
         _SPARK_SESSION = None
+        _SPARK_REMOTE = None
         try:
             session.stop()
         except Exception:  # noqa: BLE001 - an already-gone client is not an error
@@ -648,7 +660,36 @@ def _check_client_server_versions(session):
         )
 
 
-def spark(app_name="stardelt-notebook"):
+def _remote_for_cluster(cluster):
+    """The Connect endpoint for `cluster`, or the shared one when `None`.
+
+    Never starts anything: a Stopped/Failed cluster raises `ClusterStopped`; a
+    Starting/Stopping one raises `RuntimeError` (call `stardelt.compute.start` and
+    wait). The sentence names the two ways to start it.
+    """
+    if cluster is None:
+        remote = os.environ.get("SPARK_REMOTE", SPARK_REMOTE_DEFAULT).strip()
+        if not remote:
+            raise RuntimeError("SPARK_REMOTE is not set — point it at the Spark Connect endpoint.")
+        return remote
+    from stardelt import compute
+
+    view = compute.get(cluster)
+    phase = view.get("phase")
+    if phase in ("Stopped", "Failed"):
+        raise compute.ClusterStopped(
+            f"{cluster} is stopped; start it with stardelt.compute.start({cluster!r}) "
+            "or in Nova → Compute"
+        )
+    if phase in ("Starting", "Stopping"):
+        raise RuntimeError(f"{cluster} is {phase}; wait until it is Running")
+    endpoint = view.get("endpoint")
+    if not endpoint:
+        raise RuntimeError(f"{cluster} is {phase} but Nova reports no endpoint; retry in a moment")
+    return endpoint
+
+
+def spark(app_name="stardelt-notebook", cluster=None):
     """Open a Spark Connect session for bulk work, as the signed-in person.
 
     Spark now sees the catalogs you may see and the catalog checks your token;
@@ -667,7 +708,9 @@ def spark(app_name="stardelt-notebook"):
 
     If the Spark server restarted, the next call opens a new session; DataFrames and temp views of the old one are gone, and a running job is not retried.
 
-    ``SPARK_REMOTE`` selects the endpoint (default the in-cluster Connect service).
+    ``SPARK_REMOTE`` selects the endpoint (default the in-cluster Connect service);
+    ``cluster`` selects a named Spark cluster instead (default ``None`` = the shared
+    one), which must be Running: nothing starts it implicitly.
     Limitations, stated rather than implied: Spark Connect has no authentication of
     its own and is ClusterIP-only, row/column masks are Trino-only (design
     ``multitenant-catalogs.md`` §5.8), and tables written through Spark use the
@@ -681,15 +724,13 @@ def spark(app_name="stardelt-notebook"):
     """
     from pyspark.sql import SparkSession
 
-    global _SPARK_SESSION, _SPARK_TOKEN
+    global _SPARK_SESSION, _SPARK_TOKEN, _SPARK_REMOTE
 
-    remote = os.environ.get("SPARK_REMOTE", SPARK_REMOTE_DEFAULT).strip()
-    if not remote:
-        raise RuntimeError("SPARK_REMOTE is not set — point it at the Spark Connect endpoint.")
+    remote = _remote_for_cluster(cluster)
 
     names = _catalog_names()
     token = _token()
-    cached = _cached_spark_session(token)
+    cached = _cached_spark_session(token, remote)
     if cached is not None:
         _check_client_server_versions(cached)
         return cached
@@ -767,10 +808,16 @@ def spark(app_name="stardelt-notebook"):
     _install_rdd_hint()
 
     previous = _SPARK_SESSION
-    _SPARK_SESSION, _SPARK_TOKEN = session, token
+    _SPARK_SESSION, _SPARK_TOKEN, _SPARK_REMOTE = session, token, remote
     if previous is not None:
         try:
             previous.stop()
         except Exception:  # noqa: BLE001 - an already-gone client is not an error
             pass
     return session
+
+
+# At the end of the module: `compute.py` imports `stardelt.api`, so importing it earlier
+# would be a cycle (the resolver imports it lazily too).
+from stardelt import compute  # noqa: E402
+from stardelt.compute import ClusterStopped  # noqa: E402

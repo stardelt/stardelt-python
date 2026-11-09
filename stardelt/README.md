@@ -139,6 +139,22 @@ fails with `maxResultSize`, write the result to a table instead of raising the l
 
 `stardelt.spark_tips()` prints the seven rows into a notebook, so they are one cell away.
 
+## Choosing a Spark cluster (internal#161)
+
+```python
+stardelt.spark()                       # the shared cluster, always on
+stardelt.spark(cluster="mobility")     # a team cluster; it must be Running
+
+stardelt.compute.list()                # what you may use, with phase and endpoint
+stardelt.compute.start("mobility")     # waits up to 300 s for Running
+stardelt.compute.stop("mobility")
+```
+
+The command line has the same three: `stardelt compute list|start|stop`.
+
+Nothing starts implicitly — a stopped cluster raises `ClusterStopped` and names the two ways
+to start it.
+
 ## SQL in notebooks (JupySQL)
 
 `pip install "stardelt[jupyter]"`, then `%load_ext stardelt.sqlmagic` (the platform's notebook
