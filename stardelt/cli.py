@@ -24,7 +24,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, bundle, login, mcp, runs, shortcuts, skill, statements
+from stardelt import api, apply, bundle, login, maintenance, mcp, runs, shortcuts, skill, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -144,6 +144,18 @@ def _parser():
     check = package_commands.add_parser("validate", help="check a bundle offline (no host, no sign-in)")
     check.add_argument("directory", nargs="?", default=".", help="the bundle directory (default: the current one)")
     check.add_argument("-t", "--target", help="check this target only")
+    upkeep = commands.add_parser(
+        "maintenance", help="run a catalog's table maintenance through Trino (used by the operator's nightly job)"
+    )
+    upkeep_commands = upkeep.add_subparsers(dest="maintenance_command", required=True)
+    maintain = upkeep_commands.add_parser(
+        "run", help="optimize small files, expire snapshots and remove orphan files for every table of a catalog"
+    )
+    maintain.add_argument("--catalog", required=True, help="the catalog to maintain (a Trino catalog name)")
+    maintain.add_argument(
+        "--policy",
+        help="the maintenance policy as JSON (default: $STARDELT_MAINTENANCE_POLICY, else the CRD's defaults)",
+    )
     advice = commands.add_parser("skill", help="print the agent skill (SKILL.md); with --write DIR install it")
     advice.add_argument("--write", metavar="DIR", help="write DIR/stardelt/SKILL.md, for example .claude/skills")
     return parser
@@ -308,6 +320,18 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             stderr.write(f"stardelt: {err}\n")
             return ERROR
         return OK
+
+    if args.command == "maintenance":
+        raw = args.policy if args.policy is not None else environ.get("STARDELT_MAINTENANCE_POLICY", "")
+        try:
+            policy = json.loads(raw) if raw.strip() else {}
+        except ValueError as err:
+            stderr.write(f"stardelt: the policy is not JSON: {err}\n")
+            return USAGE
+        if not isinstance(policy, dict):
+            stderr.write("stardelt: the policy must be a JSON object\n")
+            return USAGE
+        return maintenance.run(args.catalog, policy, out=stdout)
 
     if args.command == "login":
         return _login(args, environ, stderr, session)
