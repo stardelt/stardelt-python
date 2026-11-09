@@ -35,6 +35,15 @@ notebook can install the same pin:
 pip install "stardelt @ git+https://github.com/stardelt/stardelt-python@v0.2.0"
 ```
 
+## Container image
+
+`ghcr.io/stardelt/stardelt-cli:dev` carries the `stardelt` command, and nothing else, for
+jobs that run outside a notebook (the platform's table-maintenance CronJob):
+
+```bash
+docker run --rm ghcr.io/stardelt/stardelt-cli:dev maintenance run --help
+```
+
 ## On a laptop
 
 A local kernel (VS Code, Jupyter) reaches the warehouse through Nova's statement API with
