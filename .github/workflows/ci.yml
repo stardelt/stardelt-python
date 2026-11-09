@@ -31,3 +31,50 @@ jobs:
 
       - name: Run the tests
         run: python -m pytest tests -q
+
+  image-cli-check:
+    name: Build the CLI image (no push)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build ghcr.io/stardelt/stardelt-cli:dev (not pushed)
+        run: docker build -t ghcr.io/stardelt/stardelt-cli:dev -f image/Dockerfile .
+
+      - name: The image runs the maintenance command
+        run: |
+          docker run --rm ghcr.io/stardelt/stardelt-cli:dev maintenance run --help
+          docker run --rm ghcr.io/stardelt/stardelt-cli:dev maintenance run --help \
+            | grep -q 'usage: stardelt maintenance run'
+
+  image-cli:
+    name: Push the CLI image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push ghcr.io/stardelt/stardelt-cli:dev
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: image/Dockerfile
+          push: true
+          tags: ghcr.io/stardelt/stardelt-cli:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
