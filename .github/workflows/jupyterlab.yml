@@ -1,0 +1,94 @@
+name: JupyterLab extension
+
+on:
+  push:
+    tags: ["jupyterlab-v*"]
+  pull_request:
+    paths: ["jupyterlab/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Extension (build, jest, pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install JupyterLab and the build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U "jupyterlab>=4.0.0,<5" build
+
+      - name: Install the JavaScript dependencies
+        working-directory: jupyterlab
+        run: jlpm install
+
+      - name: Build the extension
+        working-directory: jupyterlab
+        run: |
+          jlpm build
+          python -m pip install ".[test]"
+
+      - name: Run the template's tests
+        working-directory: jupyterlab
+        run: |
+          jlpm run test
+          pytest -q
+
+      - name: Check that JupyterLab finds the extension
+        working-directory: jupyterlab
+        run: |
+          jupyter server extension list 2>&1 | grep -ie "stardelt_jupyterlab.*OK"
+          jupyter labextension list 2>&1 | grep -ie "@stardelt/jupyterlab.*OK"
+
+  release:
+    name: Wheel on the GitHub release
+    if: startsWith(github.ref, 'refs/tags/jupyterlab-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install JupyterLab and the build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U "jupyterlab>=4.0.0,<5" build
+
+      - name: Install the JavaScript dependencies
+        working-directory: jupyterlab
+        run: jlpm install
+
+      - name: Build the wheel
+        run: python -m build jupyterlab
+
+      - name: Attach the wheel to the release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          files: jupyterlab/dist/stardelt_jupyterlab-*

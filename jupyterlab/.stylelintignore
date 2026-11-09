@@ -1,0 +1,5 @@
+# Copies of @jupyterlab/theme-dark-extension/style/variables.css and
+# @jupyterlab/theme-light-extension/style/variables.css; only the colour
+# variables differ. The upstream files are left as they are.
+style/graphite.css
+style/silver.css
