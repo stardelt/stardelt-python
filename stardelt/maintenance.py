@@ -51,7 +51,8 @@ def _tables(catalog):
     """The catalog's base tables as ``(schema, table)``, engine schemas left out."""
     return (
         f"SELECT table_schema, table_name FROM {stardelt._quote_ident(catalog)}.information_schema.tables "
-        "WHERE table_type = 'BASE TABLE' AND table_schema <> 'information_schema'"
+        "WHERE table_type = 'BASE TABLE' "
+        "AND table_schema NOT IN ('information_schema', 'system')"
     )
 
 

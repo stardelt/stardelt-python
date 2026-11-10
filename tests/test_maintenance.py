@@ -110,6 +110,12 @@ def test_excluded_table_gets_no_statement():
     assert [line.get("table") for line in lines] == ["demo.kept", None]
 
 
+def test_the_engine_schemas_are_not_maintained():
+    sql = maintenance._tables("warehouse")
+    assert "'information_schema'" in sql
+    assert "'system'" in sql
+
+
 def test_one_failing_table_does_not_stop_the_run():
     conn = FakeConnection(
         [("demo", "first"), ("demo", "second")],
