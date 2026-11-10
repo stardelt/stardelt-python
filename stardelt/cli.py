@@ -126,6 +126,10 @@ def _parser():
     ship.add_argument("--accept-drift", action="store_true", help="overwrite a pipeline changed after its last deploy even when the target says drift: block")
     ship.add_argument("--diff", action="store_true", help="also show, on standard error, what each update changes (the deployed value against the bundle's)")
     ship.add_argument("--allow-breaking", action="store_true", help="also run migration statements that are not additive (a changed file is always refused)")
+    approve = package_commands.add_parser(
+        "approve", help="approve a migration plan that a production deploy needs a second person for"
+    )
+    approve.add_argument("plan_id", help="the planId a refused deploy named; the plan's author cannot approve it")
     show = package_commands.add_parser(
         "summary", help="show what a deploy of one target left on the stage: commit, who, when, changed since"
     )
@@ -484,6 +488,14 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
                 stderr.write(f"stardelt: {err}\n")
                 return USAGE
             stderr.write(f"stardelt: wrote {', '.join(written)} in {args.directory}; now: stardelt bundle validate {args.directory}\n")
+            return OK
+        if args.command == "bundle" and args.bundle_command == "approve":
+            try:
+                answer = bundle.approve(nova, args.plan_id)
+            except api.StardeltApiError as err:
+                stderr.write(f"stardelt: {err}\n")
+                return USAGE
+            stdout.write(json.dumps(answer, ensure_ascii=False) + "\n")
             return OK
         if args.command == "bundle":  # plan or deploy: they talk to Nova
             problems, results = bundle.deploy(

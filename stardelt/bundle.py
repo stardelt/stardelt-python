@@ -488,20 +488,20 @@ def _migration_files(directory, target):
 
 
 def _migration_plan(nova, target, catalog, files):
-    """The ``migrations_plan`` answer as result rows: ``(problems, rows)``."""
+    """The ``migrations_plan`` answer as result rows and the plan id: ``(problems, rows, plan_id)``."""
     try:
         answer = nova.call("migrations_plan", body={"catalog": catalog, "target": target, "files": files})
     except api.StardeltApiError as err:
-        return [(target, f"migrations: {err}")], []
+        return [(target, f"migrations: {err}")], [], ""
     if not answer["ok"]:
-        return [(target, f"migrations: {message}") for message in answer["errors"]], []
+        return [(target, f"migrations: {message}") for message in answer["errors"]], [], ""
     rows = []
     for planned in answer["files"]:
         if planned["status"] == "applied":
             rows.append({"action": "migration-in-ledger", "name": planned["name"]})
         else:
             rows.append({"action": "would-apply-migration", "name": planned["name"], "class": planned["class"]})
-    return [], rows
+    return [], rows, answer.get("planId", "")
 
 
 def _notebook(spec):
@@ -574,7 +574,9 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
     if stream_problems:
         return stream_problems, []
     stream_specs = [{**spec, "provenance": stamp} for spec in stream_specs]
-    migration_problems, migration_rows = _migration_plan(nova, target, migration_catalog, migration_files) if migration_files else ([], [])
+    migration_problems, migration_rows, migration_plan_id = (
+        _migration_plan(nova, target, migration_catalog, migration_files) if migration_files else ([], [], "")
+    )
     if migration_problems:
         return migration_problems, []
     results, refused, changed_by_hand, unpublished = list(migration_rows), [], set(), []
@@ -643,7 +645,14 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         try:
             answer = nova.call(
                 "migrations_apply",
-                body={"catalog": migration_catalog, "target": target, "files": migration_files, "allowBreaking": allow_breaking},
+                body={
+                    "catalog": migration_catalog,
+                    "target": target,
+                    "files": migration_files,
+                    "allowBreaking": allow_breaking,
+                    "mode": mode,
+                    "approvalId": migration_plan_id if mode == "production" else "",
+                },
             )
         except api.StardeltApiError as err:
             return [(target, f"migrations: {err}")], results
@@ -673,6 +682,15 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
         done.append({"action": "deleted", "name": name})
     return [], done
+
+
+def approve(nova, plan_id):
+    """Approve one migration plan that a production deploy needs a second person for: the API answer.
+
+    ``plan_id`` is the ``planId`` Nova's 409 named. The caller must be someone other than the
+    plan's author; Nova enforces that. Raises ``api.StardeltApiError`` with Nova's sentence.
+    """
+    return nova.call("migrations_approve", body={"planId": plan_id})
 
 
 def summary(nova, directory, target):
