@@ -16,6 +16,8 @@ import yaml
 from stardelt import api, apply, runs
 
 KEYS = {"bundle", "variables", "include", "files", "requires", "targets"}
+KINDS = ("Pipeline", "StreamApp")
+PIPELINE_ONLY = ("sql", "sqlFile", "notebook", "schedule", "params")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
 GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -70,6 +72,38 @@ def _substitute(text, values, problems, where):
         return str(values[name])
 
     return USE.sub(one, text)
+
+
+def _stream_problems(where, doc, owner):
+    """What a ``StreamApp`` include file must say, offline. Nova checks the rest (the cluster,
+    the principal, the topic's existence) when the bundle is planned or deployed."""
+    problems = []
+    if doc.get("ownerGroup", owner) != owner:
+        problems.append((where, f"ownerGroup {doc['ownerGroup']!r} is not the bundle's group {owner!r}"))
+    for key in PIPELINE_ONLY:
+        if key in doc:
+            problems.append((where, f"a StreamApp is not a pipeline: remove {key}"))
+    source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+    if not (isinstance(source.get("topic"), str) and source["topic"]):
+        problems.append((where, "a StreamApp needs source.topic"))
+    if "connectionRef" in source and not (isinstance(source["connectionRef"], str) and source["connectionRef"]):
+        problems.append((where, "source.connectionRef is a Connection name"))
+    sink = doc.get("sink") if isinstance(doc.get("sink"), dict) else {}
+    if not (isinstance(sink.get("catalog"), str) and sink["catalog"]):
+        problems.append((where, "a StreamApp needs sink.catalog"))
+    table = sink.get("table")
+    parts = table.split(".") if isinstance(table, str) else []
+    if len(parts) != 2 or not all(parts):
+        problems.append((where, "sink.table is schema.table"))
+    if "mode" in sink and sink["mode"] not in ("merge", "append"):
+        problems.append((where, "sink.mode is merge or append"))
+    if "mergeKeys" in sink and not (
+        isinstance(sink["mergeKeys"], list) and all(isinstance(key, str) for key in sink["mergeKeys"])
+    ):
+        problems.append((where, "sink.mergeKeys is a list of column names"))
+    if "restartPolicy" in doc and doc["restartPolicy"] not in ("always", "on-failure"):
+        problems.append((where, "restartPolicy is always or on-failure"))
+    return problems
 
 
 def validate(directory, target=None):
@@ -145,6 +179,7 @@ def validate(directory, target=None):
         values = {v: (d or {}).get("default") for v, d in variables.items() if (d or {}).get("default") is not None}
         values.update(tvars)
         names = []
+        streams = []
         for relative in sources:
             text = (root / relative).read_text(encoding="utf-8")
             used.update(USE.findall(text))
@@ -153,6 +188,14 @@ def validate(directory, target=None):
                 doc = apply.load(text)
             except apply.ApplyError as err:
                 problems.append((f"{relative} ({tname})", str(err)))
+                continue
+            kind = doc.get("kind", "Pipeline")
+            if kind not in KINDS:
+                problems.append((f"{relative} ({tname})", f"kind must be one of {', '.join(KINDS)}"))
+                continue
+            if kind == "StreamApp":
+                problems.extend(_stream_problems(f"{relative} ({tname})", doc, owner))
+                streams.append(doc["name"])
                 continue
             names.append(doc["name"])
             schedule = doc.get("schedule")
@@ -182,6 +225,8 @@ def validate(directory, target=None):
                     problems.append((f"{relative} ({tname})", "a notebook that names a file cannot also name a version: remove name and objectVersion"))
         for dup in sorted({n for n in names if names.count(n) > 1}):
             problems.append((where, f"two pipeline files define {dup!r}"))
+        for dup in sorted({n for n in streams if streams.count(n) > 1}):
+            problems.append((where, f"two stream files define {dup!r}"))
         resolved[tname] = (mode, names)
     for v in sorted(set(variables) - used):
         warnings.append(f"variable {v!r} is declared but no pipeline file uses it")
@@ -201,6 +246,7 @@ def render(directory, target, user=None):
     ``dev-<user>-<name>`` (two people can deploy one bundle side by side) and without a schedule (run it with
     ``stardelt run``); a ``production`` target deploys as written. A notebook that is a file of the bundle stays
     ``notebook: {file: ...}`` here: ``deploy`` publishes it and pins the version. ``specs`` is empty when there are problems.
+    A file whose ``kind`` is not ``Pipeline`` (a ``StreamApp``) is not a pipeline spec: ``render_streams`` reads it.
     """
     problems, _, _ = validate(directory, target)
     if problems:
@@ -218,12 +264,47 @@ def render(directory, target, user=None):
     for relative in _files(root, manifest["include"], "include", []):
         where = f"{relative} ({target})"
         doc = apply.load(_substitute((root / relative).read_text(encoding="utf-8"), values, [], where))
+        if doc.get("kind", "Pipeline") != "Pipeline":
+            continue
         doc.setdefault("ownerGroup", owner)
         if "sqlFile" in doc:
             doc["sql"] = (root / doc.pop("sqlFile")).read_text(encoding="utf-8")
         if mode == "development":
             doc["name"] = f"dev-{_slug(user)}-{doc['name']}"
             doc.pop("schedule", None)
+            if len(doc["name"]) > 40:
+                problems.append((where, f"the development name {doc['name']} is longer than 40 characters"))
+        specs.append(doc)
+    return problems, mode, ([] if problems else specs)
+
+
+def render_streams(directory, target, user=None):
+    """The stream apps of one target as the bodies ``streams_put`` takes: ``(problems, mode, specs)``.
+
+    A ``development`` target deploys under ``dev-<user>-<name>``; the ``kind`` key is dropped.
+    """
+    problems, _, _ = validate(directory, target)
+    if problems:
+        return problems, None, []
+    root = Path(directory)
+    manifest = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))
+    chosen = manifest["targets"][target]
+    mode = chosen["mode"]
+    if mode == "development" and not _slug(user):
+        return [(f"targets.{target}", "a development target needs the name of the person who deploys: sign in first")], mode, []
+    owner = manifest["bundle"]["ownerGroup"]
+    values = {v: (d or {}).get("default") for v, d in (manifest.get("variables") or {}).items() if (d or {}).get("default") is not None}
+    values.update(chosen.get("variables") or {})
+    specs = []
+    for relative in _files(root, manifest["include"], "include", []):
+        where = f"{relative} ({target})"
+        doc = apply.load(_substitute((root / relative).read_text(encoding="utf-8"), values, [], where))
+        if doc.get("kind", "Pipeline") != "StreamApp":
+            continue
+        doc.pop("kind")
+        doc.setdefault("ownerGroup", owner)
+        if mode == "development":
+            doc["name"] = f"dev-{_slug(user)}-{doc['name']}"
             if len(doc["name"]) > 40:
                 problems.append((where, f"the development name {doc['name']} is longer than 40 characters"))
         specs.append(doc)
@@ -283,6 +364,24 @@ def _deployed(nova, bundle_name, target, mode, user):
         if (pipeline.get("deployment") or {}).get("bundle") == bundle_name
         and (pipeline.get("deployment") or {}).get("target") == target
         and pipeline["name"].startswith(prefix)
+    ]
+
+
+def _listed(nova):
+    """The caller's streams and the namespace they live in: ``(namespace, rows)``."""
+    answer = nova.call("streams_list")
+    return answer["namespace"], answer["streams"]
+
+
+def _deployed_streams(rows, bundle_name, target, mode, user):
+    """The listed streams an earlier deploy of this bundle target left on the stage."""
+    prefix = f"dev-{_slug(user)}-" if mode == "development" else ""
+    return [
+        stream
+        for stream in rows
+        if (stream.get("deployment") or {}).get("bundle") == bundle_name
+        and (stream.get("deployment") or {}).get("target") == target
+        and stream["name"].startswith(prefix)
     ]
 
 
@@ -397,6 +496,7 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
     the bundle no longer names. A target with ``drift: block`` refuses, for a plan and a deploy alike, a pipeline someone changed
     after its last deploy (``modified``) unless ``accept_drift``; the default ``warn`` only reports it. With ``diff`` each
     ``would-update`` (and ``updated``) result carries a ``diff`` text: what Nova would change, field by field.
+    ``--prune`` removes pipelines; stream apps are not removed yet (Nova has no delete for a StreamApp).
     """
     user = nova.me().get("user")
     problems, mode, specs = render(directory, target, user)
@@ -404,6 +504,10 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         return problems, []
     stamp = provenance(directory, target)
     specs = [{**spec, "provenance": stamp} for spec in specs]
+    stream_problems, _, stream_specs = render_streams(directory, target, user)
+    if stream_problems:
+        return stream_problems, []
+    stream_specs = [{**spec, "provenance": stamp} for spec in stream_specs]
     results, refused, changed_by_hand, unpublished = [], [], set(), []
     for position, spec in enumerate(specs):
         if _notebook(spec):
@@ -425,10 +529,26 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         else:
             if results[-1].get("modified"):
                 changed_by_hand.add(spec["name"])
+    stream_rows = []
+    namespace, listed = _listed(nova) if stream_specs else ("", [])
+    existing = {stream["name"]: stream for stream in listed}
+    for position, spec in enumerate(stream_specs):
+        verdict = nova.call("streams_validate", body=spec)
+        if not verdict["ok"]:
+            refused.append((target, f"{spec['name']}: {verdict['errors'][0]['message']}"))
+            continue
+        if (existing.get(spec["name"], {}).get("deployment") or {}).get("modified"):
+            changed_by_hand.add(spec["name"])
+        stream_rows.append({
+            "action": "would-update" if spec["name"] in existing else "would-create",
+            "name": spec["name"],
+            "position": position,
+        })
     if changed_by_hand and not accept_drift and _drift_mode(directory, target) == "block":
         refused += _blocked(target, changed_by_hand)
     diffs = _diffs(nova, specs, results) if diff else {}
     results = [{**r, "diff": diffs[r["name"]]} if diffs.get(r["name"]) else r for r in results]
+    results += [{k: v for k, v in row.items() if k != "position"} for row in stream_rows]
     stale = _stale(nova, stamp["bundle"], target, mode, user, {spec["name"] for spec in specs}) if prune else []
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
@@ -458,6 +578,13 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
         }
         for spec in specs
     ]
+    for row in stream_rows:
+        spec = stream_specs[row["position"]]
+        try:
+            nova.call("streams_put", path={"namespace": namespace, "name": spec["name"]}, body=spec)
+        except api.StardeltApiError as err:
+            return [(target, f"{spec['name']}: {err}")], done
+        done.append({"action": "created" if row["action"] == "would-create" else "updated", "name": spec["name"]})
     for namespace, name in stale:
         nova.call("pipelines_delete", path={"namespace": namespace, "name": name})
         done.append({"action": "deleted", "name": name})
@@ -537,7 +664,8 @@ def destroy(nova, directory, target, confirm=False):
     bundle's name and this target (in a ``development`` target only the caller's own ``dev-<user>-`` ones). A pipeline made by
     hand, or stamped by another bundle or target, is never touched. Without ``confirm`` nothing is removed and the results
     are ``would-delete`` lines; with it each pipeline is deleted and the results are ``deleted`` lines. The files of the
-    bundle are not touched.
+    bundle are not touched. ``--prune`` removes pipelines; stream apps are not removed yet (Nova has no delete for a
+    StreamApp).
     """
     problems, _, resolved = validate(directory, target)
     if problems:

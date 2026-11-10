@@ -19,6 +19,11 @@ targets:
 """
 LOAD = "name: load\nownerGroup: sales\nsqlFile: sql/load.sql\nschedule: {cron: '0 3 * * *', timezone: Europe/Berlin}\n"
 NIGHTLY = "name: nightly\nsql: select * from ${var.catalog}.demo.trips\n"
+STREAM = (
+    "kind: StreamApp\nname: measurements\nownerGroup: sales\n"
+    "source: {topic: pegelonline.measurements}\n"
+    'sink: {catalog: "${var.catalog}", table: bronze.measurements, mode: merge, mergeKeys: [station]}\n'
+)
 
 
 def make(tmp_path, manifest=MANIFEST, resources=None, files=None):
@@ -98,6 +103,43 @@ def test_two_files_with_one_pipeline_name_and_a_pattern_that_matches_nothing_are
     assert "two pipeline files define 'nightly'" in problems
     problems = said(bundle.validate(make(tmp_path, manifest=MANIFEST.replace("notebooks/*.ipynb", "notebooks/*.nope")))[0])
     assert "notebooks/*.nope: matches no file" in problems
+
+
+def test_a_stream_file_validates_and_is_not_a_pipeline_name(tmp_path):
+    problems, warnings, resolved = bundle.validate(make(tmp_path, resources={"load.yaml": LOAD, "nightly.yaml": NIGHTLY, "streams.yaml": STREAM}))
+    assert problems == []
+    assert resolved["prod"] == ("production", ["load", "nightly"]), "a stream app is not a pipeline name"
+    assert warnings == ["variable 'unused' is declared but no pipeline file uses it"]
+
+
+def test_a_stream_file_that_is_a_pipeline_or_names_another_group_is_refused(tmp_path):
+    for extra, sentence in (
+        ("sql: select 1\n", "a StreamApp is not a pipeline: remove sql"),
+        ("sink: {catalog: c, table: no-dot}\n", "sink.table is schema.table"),
+    ):
+        stream = f"kind: StreamApp\nname: measurements\nsource: {{topic: t}}\nsink: {{catalog: c, table: bronze.m}}\n{extra}"
+        problems = said(bundle.validate(make(tmp_path, resources={"streams.yaml": stream}), "dev")[0])
+        assert sentence in problems, extra
+
+
+def test_an_unknown_kind_is_refused(tmp_path):
+    problems = said(bundle.validate(make(tmp_path, resources={"a.yaml": "kind: Topic\nname: t\n"}), "dev")[0])
+    assert "a.yaml (dev): kind must be one of Pipeline, StreamApp" in problems
+
+
+def test_render_streams_gives_the_bodies_streams_put_takes(tmp_path):
+    problems, mode, specs = bundle.render_streams(
+        make(tmp_path, resources={"load.yaml": LOAD, "nightly.yaml": NIGHTLY, "streams.yaml": STREAM}), "dev", "alice"
+    )
+    assert (problems, mode) == ([], "development")
+    assert specs == [
+        {
+            "name": "dev-alice-measurements",
+            "ownerGroup": "sales",
+            "source": {"topic": "pegelonline.measurements"},
+            "sink": {"catalog": "sales_dev", "table": "bronze.measurements", "mode": "merge", "mergeKeys": ["station"]},
+        }
+    ]
 
 
 def test_paths_must_stay_inside_the_bundle_and_links_and_big_files_are_refused(tmp_path):

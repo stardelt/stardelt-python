@@ -9,12 +9,15 @@ import pytest
 
 from stardelt import bundle, cli
 from tests.test_api import CANARY, FakeResponse, FakeSession
-from tests.test_bundle import make
+from tests.test_bundle import LOAD as LOAD_YAML
+from tests.test_bundle import MANIFEST, STREAM, make
 
 ENV = {"STARDELT_NOVA_URL": "https://nova.example", "STARDELT_TOKEN": CANARY}
 ME = FakeResponse(payload={"user": "alice"})
 CREATE = {"ok": True, "action": "create", "errors": [], "changes": [], "nextRuns": ["2026-11-02T03:00:00+01:00"]}
 UPDATE = {"ok": True, "action": "update", "errors": [], "changes": ["statement"], "nextRuns": []}
+STREAM_OK = {"ok": True, "errors": []}
+NO_STREAMS = {"namespace": "stardelt", "streams": []}
 LOAD = {
     "name": "load",
     "ownerGroup": "sales",
@@ -238,3 +241,111 @@ def test_a_refusal_means_nothing_is_deleted_either(tmp_path):
     )
     assert code == 2 and "load: no" in err
     assert [method for method, _ in calls(session)] == ["GET", "POST", "POST", "GET"], "no write, no delete"
+
+
+def with_stream(tmp_path, manifest=None):
+    """A bundle with one pipeline and one stream app: ``resources/load.yaml`` and ``resources/streams.yaml``."""
+    resources = {"load.yaml": LOAD_YAML, "streams.yaml": STREAM}
+    return make(tmp_path, manifest=MANIFEST if manifest is None else manifest, resources=resources)
+
+
+MODIFIED = {
+    "namespace": "stardelt",
+    "streams": [
+        {"name": "measurements", "namespace": "stardelt", "deployment": {"bundle": "sales-etl", "target": "prod", "modified": True}},
+    ],
+}
+
+
+def test_plan_lists_a_stream_as_would_create_and_writes_nothing(tmp_path):
+    with_stream(tmp_path)
+    code, out, err, session = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod"], ME, FakeResponse(payload=CREATE),
+        FakeResponse(payload=NO_STREAMS), FakeResponse(payload=STREAM_OK),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "would-create", "name": "load", "nextRuns": ["2026-11-02T03:00:00+01:00"]},
+        {"action": "would-create", "name": "measurements"},
+    ]
+    assert calls(session) == [
+        ("GET", "/api/me"), ("POST", "/api/pipelines/validate"),
+        ("GET", "/api/streams"), ("POST", "/api/streams/validate"),
+    ], "no write"
+    sent = session.calls[3][2]["json"]
+    assert sent == {
+        "name": "measurements",
+        "ownerGroup": "sales",
+        "source": {"topic": "pegelonline.measurements"},
+        "sink": {"catalog": "sales", "table": "bronze.measurements", "mode": "merge", "mergeKeys": ["station"]},
+        "provenance": {"bundle": "sales-etl", "target": "prod"},
+    }
+
+
+def test_plan_lists_a_stream_of_this_bundle_target_as_would_update(tmp_path):
+    with_stream(tmp_path)
+    listed = {"namespace": "stardelt", "streams": [
+        {"name": "measurements", "namespace": "stardelt", "deployment": {"bundle": "sales-etl", "target": "prod"}},
+    ]}
+    code, out, _, _ = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod"], ME, FakeResponse(payload=CREATE),
+        FakeResponse(payload=listed), FakeResponse(payload=STREAM_OK),
+    )
+    assert code == 0
+    assert [json.loads(line) for line in out.splitlines()][-1] == {"action": "would-update", "name": "measurements"}
+
+
+def test_a_refused_stream_stops_the_command_before_anything_is_written(tmp_path):
+    with_stream(tmp_path)
+    refused = {"ok": False, "errors": [{"message": "sink.catalog is 1 to 63 lower-case letters, digits and dashes"}]}
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod"], ME, FakeResponse(payload=CREATE),
+        FakeResponse(payload=NO_STREAMS), FakeResponse(payload=refused),
+    )
+    assert code == 2
+    assert err == "stardelt: prod: measurements: sink.catalog is 1 to 63 lower-case letters, digits and dashes\n"
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "would-create", "name": "load", "nextRuns": ["2026-11-02T03:00:00+01:00"]},
+    ], "what passed is still reported"
+    assert [method for method, _ in calls(session)] == ["GET", "POST", "GET", "POST"], "no create, no update"
+
+
+def test_deploy_puts_the_stream_with_its_stamp(tmp_path):
+    with_stream(tmp_path)
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=CREATE), FakeResponse(payload=NO_STREAMS), FakeResponse(payload=STREAM_OK),
+        FakeResponse(payload={"pipelines": []}), FakeResponse(201, {"name": "load"}),
+        FakeResponse(payload={"name": "measurements"}),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "created", "name": "load"},
+        {"action": "created", "name": "measurements"},
+    ]
+    method, path, kwargs = session.calls[-1]
+    assert (method, path) == ("PUT", "https://nova.example/api/streams/stardelt/measurements")
+    assert kwargs["json"]["name"] == "measurements"
+    assert kwargs["json"]["provenance"] == {"bundle": "sales-etl", "target": "prod"}, "no commit outside a checkout"
+
+
+def test_a_hand_changed_stream_is_refused_by_a_drift_block_target_unless_accepted(tmp_path):
+    manifest = MANIFEST.replace("runAs: pipeline-sales}", "runAs: pipeline-sales, drift: block}")
+    with_stream(tmp_path, manifest=manifest)
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod"], ME, FakeResponse(payload=CREATE),
+        FakeResponse(payload=MODIFIED), FakeResponse(payload=STREAM_OK),
+    )
+    assert code == 2
+    assert "measurements was changed after its last deploy and this target says drift: block" in err
+    assert [method for method, _ in calls(session)] == ["GET", "POST", "GET", "POST"], "no write"
+
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod", "--accept-drift"], ME, FakeResponse(payload=CREATE),
+        FakeResponse(payload=MODIFIED), FakeResponse(payload=STREAM_OK),
+        FakeResponse(payload={"pipelines": []}), FakeResponse(201, {"name": "load"}),
+        FakeResponse(payload={"name": "measurements"}),
+    )
+    assert (code, err) == (0, "")
+    assert calls(session)[-1] == ("PUT", "/api/streams/stardelt/measurements")
+    assert {"action": "updated", "name": "measurements"} in [json.loads(line) for line in out.splitlines()]
