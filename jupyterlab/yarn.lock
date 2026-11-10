@@ -2558,7 +2558,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/notebook@npm:^4.6.6":
+"@jupyterlab/notebook@npm:^4.0.0, @jupyterlab/notebook@npm:^4.6.6":
   version: 4.6.6
   resolution: "@jupyterlab/notebook@npm:4.6.6"
   dependencies:
@@ -3547,6 +3547,7 @@ __metadata:
     "@jupyterlab/application": ^4.0.0
     "@jupyterlab/apputils": ^4.0.0
     "@jupyterlab/coreutils": ^6.0.0
+    "@jupyterlab/notebook": ^4.0.0
     "@jupyterlab/services": ^7.0.0
     "@jupyterlab/testutils": ^4.0.0
     "@lumino/widgets": ^2.0.0

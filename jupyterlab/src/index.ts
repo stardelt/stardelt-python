@@ -9,6 +9,8 @@ import { PageConfig } from '@jupyterlab/coreutils';
 
 import { Widget } from '@lumino/widgets';
 
+import { parametersCellPlugin, publishPlugin } from './publish';
+
 /**
  * Register the stardelt themes: Graphite (dark, the default) and Silver (light).
  */
@@ -84,4 +86,4 @@ const topBarPlugin: JupyterFrontEndPlugin<void> = {
   }
 };
 
-export default [themePlugin, topBarPlugin];
+export default [themePlugin, topBarPlugin, publishPlugin, parametersCellPlugin];
