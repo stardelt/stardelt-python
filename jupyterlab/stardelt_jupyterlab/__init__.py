@@ -1,5 +1,7 @@
 import os
 
+from .handlers import handlers
+
 try:
     from ._version import __version__
 except ImportError:
@@ -35,5 +37,11 @@ def _load_jupyter_server_extension(server_app):
     page_config = server_app.web_app.settings.setdefault('page_config_data', {})
     page_config['stardeltNovaUrl'] = os.environ.get('STARDELT_NOVA_URL', '')
     page_config['stardeltRuntime'] = os.environ.get('STARDELT_RUNTIME', '')
+    # The Publish button publishes through these routes: the handler resolves
+    # the notebook path against the single-user server's root, never against a
+    # path the browser picked.
+    web_app = server_app.web_app
+    web_app.settings['stardelt_root_dir'] = server_app.root_dir
+    web_app.add_handlers('.*$', handlers(web_app.settings['base_url']))
     name = "stardelt_jupyterlab"
     server_app.log.info(f"Registered {name} server extension")

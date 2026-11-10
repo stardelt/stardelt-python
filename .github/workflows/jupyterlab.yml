@@ -44,6 +44,10 @@ jobs:
         run: |
           jlpm build
           python -m pip install ".[test]"
+          # The publish handlers call the library that ships beside this
+          # package (`from stardelt.publish import publish`), so its tests need
+          # it installed; the image gets both from the same commit.
+          python -m pip install ..
 
       - name: Run the template's tests
         working-directory: jupyterlab
