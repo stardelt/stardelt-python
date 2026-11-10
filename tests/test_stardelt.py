@@ -453,6 +453,54 @@ def test_client_credentials_used_when_the_hub_token_is_absent(trino, pipeline_en
     assert os.environ["TRINO_TOKEN"] == "fresh.token.value"
 
 
+class _HubReply:
+    """The shape of ``GET /hub/api/users/<name>``: the token sits in ``auth_state``."""
+
+    def __init__(self, token, status=200):
+        self.status_code = status
+        self._token = token
+
+    def json(self):
+        return {"auth_state": {"access_token": self._token}}
+
+
+def test_an_expired_hub_token_is_read_again_from_the_hub(trino, monkeypatch):
+    """No restart: the server reads its own fresh token (W2b, stardelt-platform#831)."""
+    stale = _jwt_exp(time.time() - 60)
+    fresh = _jwt_exp(time.time() + 3600)
+    monkeypatch.setenv("TRINO_TOKEN", stale)
+    monkeypatch.setenv("JUPYTERHUB_API_URL", "http://hub:8081/hub/api")
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "server-token")
+    monkeypatch.setenv("JUPYTERHUB_USER", "dev-finops")
+    monkeypatch.setenv("PIPELINE_TOKEN_URL", "https://idp.example/token")
+    monkeypatch.setenv("PIPELINE_CLIENT_SECRET", "unused")
+    seen = {}
+
+    def get(url, headers=None, timeout=None):
+        seen.update(url=url, headers=headers, timeout=timeout)
+        return _HubReply(fresh)
+
+    monkeypatch.setattr(stardelt.requests, "get", get)
+    monkeypatch.setattr(stardelt.requests, "post", lambda *a, **k: pytest.fail("the hub answers first"))
+    stardelt.sql("SELECT 1")
+    assert os.environ["TRINO_TOKEN"] == fresh
+    assert seen["url"] == "http://hub:8081/hub/api/users/dev-finops"
+    assert seen["headers"] == {"Authorization": "token server-token"}
+    assert seen["timeout"] == 15
+
+
+def test_a_refused_hub_token_still_asks_for_a_restart(trino, monkeypatch):
+    """A revoked session is the one case that needs the person (403 from the hub)."""
+    monkeypatch.setenv("TRINO_TOKEN", _jwt_exp(time.time() - 60))
+    monkeypatch.setenv("JUPYTERHUB_API_URL", "http://hub:8081/hub/api")
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "server-token")
+    monkeypatch.setenv("JUPYTERHUB_USER", "dev-finops")
+    monkeypatch.delenv("PIPELINE_TOKEN_URL", raising=False)
+    monkeypatch.setattr(stardelt.requests, "get", lambda *a, **k: _HubReply(None, status=403))
+    with pytest.raises(RuntimeError, match="restart this server from the hub"):
+        stardelt.sql("SELECT 1")
+
+
 def test_token_is_fetched_again_within_60_seconds_of_expiry(trino, pipeline_env, monkeypatch):
     monkeypatch.setattr(stardelt.time, "time", lambda: 1000.0)
     monkeypatch.setenv("TRINO_TOKEN", _jwt_exp(1100))  # 100 s left: keep

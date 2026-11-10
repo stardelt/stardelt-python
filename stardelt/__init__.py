@@ -152,11 +152,40 @@ def _fetch_token():
     return response.json()["access_token"]
 
 
+def _hub_token():
+    """The person's *current* token from the hub, or ``None`` outside a notebook pod.
+
+    A server's token may read only its owner's auth state (the spike in
+    stardelt-platform#831 measured the cross-user case answering 404), and the
+    hub refreshes it on the server's own activity posts. So an expired
+    ``TRINO_TOKEN`` is renewed here without a restart. Nothing is written to a
+    log or to an error message.
+    """
+    base = os.environ.get("JUPYTERHUB_API_URL", "").strip().rstrip("/")
+    token = os.environ.get("JUPYTERHUB_API_TOKEN", "").strip()
+    user = os.environ.get("JUPYTERHUB_USER", "").strip()
+    if not (base and token and user):
+        return None
+    try:
+        response = requests.get(
+            f"{base}/users/{user}",
+            headers={"Authorization": f"token {token}"},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+    if response.status_code != 200:
+        return None
+    state = response.json().get("auth_state") or {}
+    fresh = (state.get("access_token") or "").strip()
+    return fresh or None
+
+
 def _token():
     """The token for the next statement, renewed when it is within the skew of expiry.
 
-    Hub pod: the token is the signed-in person's and only the hub can renew it, so an
-    expired one is a clear message, not a request a person cannot answer.
+    Hub pod: the token is the signed-in person's; ``_hub_token()`` re-reads it from the hub,
+    and only when the hub refuses (a revoked session) does the message ask for a restart.
     Pipeline pod: the token came from the pod's own client-credentials grant, so the same
     grant gets another one. The new token replaces ``TRINO_TOKEN`` so ``stardelt.connection()``
     (which reads the environment) uses the same one.
@@ -165,6 +194,10 @@ def _token():
     expiry = _expiry(token)
     if token and (expiry is None or expiry - time.time() > TOKEN_REFRESH_SKEW_SECONDS):
         return token
+    fresh = _hub_token()
+    if fresh:
+        os.environ["TRINO_TOKEN"] = fresh
+        return fresh
     if not _can_refresh():
         if not token:
             raise RuntimeError(
