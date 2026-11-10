@@ -166,6 +166,12 @@ def _parser():
     )
     advice = commands.add_parser("skill", help="print the agent skill (SKILL.md); with --write DIR install it")
     advice.add_argument("--write", metavar="DIR", help="write DIR/stardelt/SKILL.md, for example .claude/skills")
+    nb = commands.add_parser("notebook", help="work with published notebooks")
+    nb_commands = nb.add_subparsers(dest="notebook_command", required=True)
+    pub = nb_commands.add_parser("publish", help="publish a notebook as a new version that a schedule can pin")
+    pub.add_argument("file", help="the .ipynb file")
+    pub.add_argument("--group", help="the owner group (default: your only group)")
+    pub.add_argument("--name", help="the name in Nova (default: the file name)")
     return parser
 
 
@@ -340,6 +346,16 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
             stderr.write("stardelt: the policy must be a JSON object\n")
             return USAGE
         return maintenance.run(args.catalog, policy, out=stdout)
+
+    if args.command == "notebook":
+        try:
+            from stardelt.publish import publish
+
+            publish(args.file, group=args.group, name=args.name)
+        except (OSError, ValueError, RuntimeError) as err:
+            stderr.write(f"stardelt: {err}\n")
+            return ERROR
+        return OK
 
     if args.command == "login":
         return _login(args, environ, stderr, session)

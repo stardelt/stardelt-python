@@ -15,6 +15,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
+import requests
 
 import stardelt
 from stardelt.publish import MAX_PUBLISH_BYTES
@@ -183,3 +184,84 @@ def test_no_token_in_repr_or_errors(nova, notebook, capsys):
         stardelt.publish(notebook)
     assert CANARY not in str(exc.value)
     assert "<token>" in str(exc.value)
+
+
+class _FakeResponse:
+    """What ``requests.put`` answers in the off-platform tests: the stored version."""
+
+    status_code = 200
+
+    def __init__(self):
+        self.reply = {
+            "name": "demo.ipynb",
+            "group": "analytics",
+            "objectVersion": "v-3",
+            "sha256": "d1e2f3",
+            "parameters": [],
+        }
+
+    def json(self):
+        return self.reply
+
+
+def _stored_login(tmp_path, host="https://nova.example"):
+    """A sign-in file as ``stardelt login`` leaves it, for the off-platform path."""
+    path = tmp_path / "config" / "stardelt" / "credentials.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "issuer": "https://id.example/realms/stardelt",
+                "client_id": "stardelt-dev",
+                "token_endpoint": "https://id.example/realms/stardelt/protocol/openid-connect/token",
+                "access_token": "stored-token",
+                "refresh_token": "stored-refresh",
+                "expires_at": 9999999999,
+                "host": host,
+            }
+        )
+    )
+    return path
+
+
+def test_off_platform_uses_the_login_host_and_token(monkeypatch, tmp_path, notebook):
+    monkeypatch.delenv("STARDELT_NOVA_URL", raising=False)
+    monkeypatch.delenv("TRINO_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("STARDELT_TOKEN", "t")
+    _stored_login(tmp_path)
+
+    sent = []
+
+    def fake_put(url, **kwargs):
+        sent.append((url, kwargs))
+        return _FakeResponse()
+
+    monkeypatch.setattr(requests, "put", fake_put)
+
+    result = stardelt.publish(notebook, group="g", name="n")
+
+    assert result["version"] == "v-3"
+    assert len(sent) == 1
+    url, kwargs = sent[0]
+    assert url == "https://nova.example/api/notebooks/g/n"
+    assert kwargs["headers"]["Authorization"] == "Bearer t"
+    assert kwargs["data"] == NOTEBOOK
+
+
+def test_not_on_the_platform_and_not_signed_in(monkeypatch, tmp_path, notebook):
+    monkeypatch.delenv("STARDELT_NOVA_URL", raising=False)
+    monkeypatch.delenv("STARDELT_TOKEN", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty"))
+
+    with pytest.raises(RuntimeError) as exc:
+        stardelt.publish(notebook, group="g")
+
+    assert "stardelt login" in str(exc.value)
+
+
+def test_cli_notebook_publish(nova, notebook):
+    from stardelt import cli
+
+    assert cli.main(["notebook", "publish", str(notebook), "--group", "g"]) == 0
+    assert nova.requests[0]["path"] == "/api/notebooks/g/demo.ipynb"

@@ -18,9 +18,11 @@ base name. The result is a small dict — ``name``, ``group``, ``version``,
 ``sha256``, ``parameters`` — and is printed for the notebook cell.
 
 Nova is reached through its public URL (``STARDELT_NOVA_URL``): the single-user
-network policy blocks in-cluster ranges. That URL's certificate is a public
-one, while ``REQUESTS_CA_BUNDLE`` in the pod is the warehouse's internal CA, so
-this call verifies against the public trust store (``certifi``) explicitly.
+network policy blocks in-cluster ranges. Off the platform the publish uses the
+host and sign-in of ``stardelt login`` (or ``STARDELT_TOKEN``) instead. That
+URL's certificate is a public one, while ``REQUESTS_CA_BUNDLE`` in the pod is
+the warehouse's internal CA, so this call verifies against the public trust
+store (``certifi``) explicitly.
 The token is never printed, returned or put in an error message.
 
 SPDX-License-Identifier: MIT
@@ -115,17 +117,25 @@ def publish(path, group=None, name=None):
     The returned dict has ``name``, ``group``, ``version`` (the immutable
     object version a schedule pins), ``sha256`` (of the stored bytes) and the
     parsed ``parameters``; it is printed too. Every failure is one line, with
-    Nova's own sentence when the server answered.
+    Nova's own sentence when the server answered. On the platform Nova is
+    reached through ``STARDELT_NOVA_URL``; off the platform it uses the host
+    and sign-in of ``stardelt login``, or ``STARDELT_TOKEN``.
     """
-    from stardelt import _token  # the refreshed token sql() uses; deferred to avoid a cycle
-
     base = os.environ.get("STARDELT_NOVA_URL", "").strip().rstrip("/")
-    if not base:
-        raise RuntimeError(
-            "STARDELT_NOVA_URL is not set — this notebook is not running on the platform."
-        )
+    if base:
+        from stardelt import _token  # the refreshed token sql() uses; deferred to avoid a cycle
 
-    token = _token()
+        token = _token()
+    else:
+        from stardelt import login  # deferred, as _token is
+
+        creds = login.load(os.environ) or {}
+        base = str(creds.get("host", "")).strip().rstrip("/")
+        if not base:
+            raise RuntimeError(
+                "stardelt.publish: not on the platform and not signed in: run `stardelt login` first."
+            )
+        token = os.environ.get("STARDELT_TOKEN", "").strip() or login.fresh_token(os.environ, requests.Session())
     group = _choose_group(token, group)
     filename = os.path.basename(os.fspath(path))
     name = str(name).strip() if name is not None else filename
