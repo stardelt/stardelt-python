@@ -231,6 +231,13 @@
       "query_params": [],
       "body": false
     },
+    "migrations_apply": {
+      "method": "POST",
+      "path": "/api/migrations/apply",
+      "path_params": [],
+      "query_params": [],
+      "body": true
+    },
     "migrations_plan": {
       "method": "POST",
       "path": "/api/migrations/plan",
