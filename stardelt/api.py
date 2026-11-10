@@ -6,9 +6,10 @@
     nova.me()                             # who the platform thinks you are
     nova.query("select 1 as x").to_pandas()
 
-The token is sent as a bearer token. Every error answer from Nova is the envelope
-``{"error": "<sentence>"}``; it becomes a ``StardeltApiError`` whose message is that
-one sentence plus the HTTP status. A token never appears in a message or a repr.
+The token is sent as a bearer token. An error answer from Nova is either the envelope
+``{"error": "<sentence>"}`` or an ``ApplyAnswer`` with ``{"ok": false, "errors": [...]}``;
+both become a ``StardeltApiError`` whose message is those sentences, joined, plus the HTTP
+status. A token never appears in a message or a repr.
 """
 
 import functools
@@ -166,9 +167,15 @@ class Client:
         )
         if response.status_code >= 400:
             try:
-                message = response.json()["error"]
+                payload = response.json()
             except Exception:
-                message = (response.text or "").strip()[:200] or "no message"
+                payload = {}
+            message = (
+                payload.get("error")
+                or "; ".join(str(sentence) for sentence in payload.get("errors") or [])
+                or (response.text or "").strip()[:200]
+                or "no message"
+            )
             raise StardeltApiError(response.status_code, " ".join(str(message).split()))
         return response
 

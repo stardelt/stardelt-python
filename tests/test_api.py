@@ -76,6 +76,14 @@ def test_error_envelope_becomes_one_line_error():
     assert str(caught.value) == "line one line two (HTTP 400)"
 
 
+def test_apply_answer_errors_are_surfaced():
+    c, _ = client(FakeResponse(status=409, payload={"ok": False, "applied": [], "skipped": [], "errors": ["a breaking change needs approval", "run stardelt bundle approve abc"]}))
+    with pytest.raises(api.StardeltApiError) as caught:
+        c.call("migrations_apply", body={"files": []})
+    assert caught.value.status == 409
+    assert str(caught.value) == "a breaking change needs approval; run stardelt bundle approve abc (HTTP 409)"
+
+
 def test_non_json_error_is_one_line():
     c, _ = client(FakeResponse(status=502, text="  Bad\nGateway  "))
     with pytest.raises(api.StardeltApiError) as caught:
