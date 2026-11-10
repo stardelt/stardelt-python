@@ -13,6 +13,8 @@ CREATE = {"ok": True, "action": "create", "errors": [], "changes": [], "nextRuns
 PLAN = {
     "ok": True,
     "ledger": True,
+    "planId": "c" * 64,
+    "approvable": True,
     "files": [
         {"name": "001_init.sql", "sha256": "a" * 64, "class": "additive", "status": "applied", "statements": 1},
         {"name": "002_add.sql", "sha256": "b" * 64, "class": "additive", "status": "new", "statements": 1},
@@ -30,6 +32,10 @@ migrations:
 targets:
   prod: {mode: production, runAs: pipeline-sales}
 """
+DEV_MANIFEST = MANIFEST.replace(
+    "  prod: {mode: production, runAs: pipeline-sales}",
+    "  dev: {mode: development, runAs: pipeline-sales}",
+)
 RESOURCE = "name: load\nownerGroup: sales\nsql: select 1\n"
 MIGRATIONS = {
     "sql/migrations/001_init.sql": "create table trips (id int)",
@@ -138,3 +144,53 @@ def test_a_refused_breaking_migration_stops_the_deploy_and_allow_breaking_passes
     code, _, _, session = run(["bundle", "deploy", str(tmp_path), "-t", "prod", "--allow-breaking"], *answers)
     assert code == 2
     assert session.calls[-1][2]["json"]["allowBreaking"] is True
+
+
+def test_a_production_deploy_sends_the_mode_and_the_plan_id(tmp_path):
+    build(tmp_path)
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=PLAN), FakeResponse(payload=CREATE), FakeResponse(payload=APPLIED),
+        FakeResponse(payload={"pipelines": []}), FakeResponse(status=201, payload={"name": "load"}),
+    )
+    assert (code, err) == (0, "")
+    apply_call = [call for call in session.calls if call[1].endswith("/api/migrations/apply")][0]
+    assert apply_call[2]["json"]["mode"] == "production"
+    assert apply_call[2]["json"]["approvalId"] == "c" * 64
+
+
+def test_a_development_deploy_sends_development_and_no_approval(tmp_path):
+    build(tmp_path, manifest=DEV_MANIFEST)
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "dev"],
+        ME, FakeResponse(payload=PLAN), FakeResponse(payload=CREATE), FakeResponse(payload=APPLIED),
+        FakeResponse(payload={"pipelines": []}), FakeResponse(status=201, payload={"name": "dev-alice-load"}),
+    )
+    assert (code, err) == (0, "")
+    apply_call = [call for call in session.calls if call[1].endswith("/api/migrations/apply")][0]
+    assert apply_call[2]["json"]["mode"] == "development"
+    assert apply_call[2]["json"]["approvalId"] == ""
+
+
+def test_bundle_approve_calls_the_new_route():
+    code, out, err, session = run(
+        ["bundle", "approve", "c" * 64],
+        FakeResponse(payload={"planId": "c" * 64, "approver": "Bob", "approvedAt": 1}),
+    )
+    assert (code, err) == (0, "")
+    assert json.loads(out) == {"planId": "c" * 64, "approver": "Bob", "approvedAt": 1}
+    assert calls(session) == [("POST", "/api/migrations/approve")]
+    assert session.calls[0][2]["json"] == {"planId": "c" * 64}
+
+
+def test_a_refused_production_deploy_prints_nova_s_sentence(tmp_path):
+    build(tmp_path)
+    sentence = "a breaking change in a production target needs a second person: stardelt bundle approve abc"
+    refused = FakeResponse(status=409, payload={"ok": False, "applied": [], "skipped": [], "errors": [sentence]})
+    code, out, err, session = run(
+        ["bundle", "deploy", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=PLAN), FakeResponse(payload=CREATE), refused,
+    )
+    assert code == 2
+    assert err.startswith("stardelt: prod: migrations: ")
+    assert sentence in err
