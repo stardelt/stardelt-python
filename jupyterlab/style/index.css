@@ -1,1 +1,29 @@
 @import url('base.css');
+
+/* The stardelt Catalog tree in the left sidebar. Theme variables only: it
+   follows the stardelt Graphite and stardelt Silver themes. */
+.stardelt-Catalog {
+  overflow: auto;
+  padding: 4px;
+}
+
+.stardelt-Catalog-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 12px;
+}
+
+.stardelt-Catalog-item {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 4px;
+  text-align: left;
+  width: 100%;
+}
+
+.stardelt-Catalog-error {
+  color: var(--jp-error-color1);
+}

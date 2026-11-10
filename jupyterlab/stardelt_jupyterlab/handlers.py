@@ -12,6 +12,7 @@ SPDX-License-Identifier: MIT
 
 import asyncio
 import os
+import re
 import subprocess
 
 from jupyter_server.base.handlers import APIHandler
@@ -139,9 +140,56 @@ class PublishHandler(_StardeltPublishHandler):
         self.finish(result)
 
 
+_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _catalog_names(sql):
+    """The first column of a `SHOW …` answer as strings; `[]` for an empty frame."""
+    import stardelt
+
+    frame = stardelt.sql(sql)
+    if frame is None or len(frame) == 0 or len(frame.columns) == 0:
+        return []
+    return [str(value) for value in frame.iloc[:, 0].tolist()]
+
+
+class CatalogTreeHandler(APIHandler):
+    """The stardelt Catalog sidebar: catalogs, then schemas, then tables (nova#652 W5).
+
+    Every level runs as the signed-in person (`stardelt.sql`), so Trino's and the
+    catalog's own access rules decide what appears. Nothing is cached.
+    """
+
+    @web.authenticated
+    async def get(self):
+        catalog = self.get_query_argument("catalog", "")
+        schema = self.get_query_argument("schema", "")
+        if (catalog and not _NAME.match(catalog)) or (schema and not _NAME.match(schema)):
+            raise web.HTTPError(400, "catalog and schema must be plain names")
+        if schema:
+            statement, key = f'SHOW TABLES FROM "{catalog}"."{schema}"', "tables"
+        elif catalog:
+            statement, key = f'SHOW SCHEMAS FROM "{catalog}"', "schemas"
+        else:
+            statement, key = "SHOW CATALOGS", "catalogs"
+        try:
+            # stardelt.sql is a blocking Trino call: keep the server's loop free.
+            names = await asyncio.to_thread(_catalog_names, statement)
+        except Exception as err:  # noqa: BLE001 - one sentence, never a token
+            self.set_status(502)
+            self.finish({"error": str(err).strip().splitlines()[0] if str(err).strip() else "the warehouse did not answer"})
+            return
+        if key == "catalogs":
+            import stardelt
+
+            names = [name for name in names if name not in stardelt.HIDDEN_CATALOGS]
+        self.finish({key: names})
+
+
 def handlers(base_url):
-    """The two routes, joined onto the server's base URL."""
+    """The routes, joined onto the server's base URL."""
     return [
         (url_path_join(base_url, "stardelt", "publish-info"), PublishInfoHandler),
         (url_path_join(base_url, "stardelt", "publish"), PublishHandler),
+        (url_path_join(base_url, "stardelt", "catalog"), CatalogTreeHandler),
     ]
