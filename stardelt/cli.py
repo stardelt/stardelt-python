@@ -24,7 +24,7 @@ from pathlib import Path
 
 import requests
 
-from stardelt import api, apply, bundle, login, maintenance, mcp, runs, shortcuts, skill, statements
+from stardelt import api, apply, bundle, lineage, login, maintenance, mcp, runs, shortcuts, skill, statements
 
 OK, ERROR, USAGE, AUTH = 0, 1, 2, 3
 
@@ -89,6 +89,14 @@ def _parser():
     export.add_argument("namespace")
     export.add_argument("name")
     export.add_argument("--format", choices=["yaml", "json"], default="yaml", help="yaml (default) or json")
+    tree = commands.add_parser("lineage", help="where a table comes from and what depends on it (upstream and downstream)")
+    tree.add_argument("table", help="the table as catalog.schema.table")
+    tree.add_argument("--depth", type=int, default=2, help="how many hops each way (default 2)")
+    tree.add_argument("--days", type=int, default=30, help="the time window in days (default 30)")
+    which = tree.add_mutually_exclusive_group()
+    which.add_argument("--upstream", action="store_const", const="up", dest="direction", help="only the tables it is built from")
+    which.add_argument("--downstream", action="store_const", const="down", dest="direction", help="only the tables built from it")
+    tree.add_argument("--format", choices=["table", "json"], default="table")
     server = commands.add_parser("mcp", help="a local MCP server over the public API")
     server_commands = server.add_subparsers(dest="mcp_command", required=True)
     serve = server_commands.add_parser("serve", help="serve the read-only tools on stdio, for an MCP client")
@@ -394,6 +402,28 @@ def main(argv=None, environ=None, stdout=None, stderr=None, session=None, stdin=
     try:
         if args.command == "whoami":
             stdout.write(json.dumps(nova.me(), indent=2, ensure_ascii=False) + "\n")
+            return OK
+        if args.command == "lineage":
+            if args.depth < 1 or args.depth > 5 or args.days < 1 or args.days > 365:
+                stderr.write("stardelt: --depth is 1 to 5 and --days is 1 to 365\n")
+                return USAGE
+            try:
+                answer = lineage.graph(nova, args.table, depth=args.depth, days=args.days)
+            except lineage.TableRefError as err:
+                stderr.write(f"stardelt: {err}\n")
+                return USAGE
+            if args.format == "json":
+                stdout.write(json.dumps(answer, indent=2, ensure_ascii=False) + "\n")
+                return OK
+            found = lineage.rows(answer, args.direction)
+            if not found:
+                stderr.write(f"stardelt: no lineage for {args.table} in the last {args.days} days\n")
+                return OK
+            stdout.write(_table(["level", "dataset", "written by", "last write", "readers"], [
+                [row["level"], row["dataset"], row["job"], row["lastWrite"], row["readers"]] for row in found
+            ]))
+            for line in lineage.jobs(answer):
+                stderr.write(f"stardelt: job {line}\n")
             return OK
         if args.command == "apply":
             for spec in specs:

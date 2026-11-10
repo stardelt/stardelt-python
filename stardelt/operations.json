@@ -190,6 +190,18 @@
       "query_params": [],
       "body": false
     },
+    "lineage_columns": {
+      "method": "GET",
+      "path": "/api/lineage/columns",
+      "path_params": [],
+      "query_params": [
+        "catalog",
+        "schema",
+        "table",
+        "days"
+      ],
+      "body": false
+    },
     "lineage_graph": {
       "method": "GET",
       "path": "/api/lineage",
@@ -198,7 +210,8 @@
         "catalog",
         "schema",
         "table",
-        "depth"
+        "depth",
+        "days"
       ],
       "body": false
     },
@@ -224,6 +237,18 @@
       "path_params": [],
       "query_params": [
         "catalog"
+      ],
+      "body": false
+    },
+    "notebooks_content": {
+      "method": "GET",
+      "path": "/api/notebooks/{group}/{name}/content",
+      "path_params": [
+        "group",
+        "name"
+      ],
+      "query_params": [
+        "version"
       ],
       "body": false
     },
@@ -407,6 +432,20 @@
       ],
       "body": false
     },
+    "pipelines_run_task_notebook": {
+      "method": "GET",
+      "path": "/api/pipelines/{namespace}/{name}/runs/{run_id}/tasks/{task_id}/notebook",
+      "path_params": [
+        "namespace",
+        "name",
+        "run_id",
+        "task_id"
+      ],
+      "query_params": [
+        "download"
+      ],
+      "body": false
+    },
     "pipelines_run_trigger": {
       "method": "POST",
       "path": "/api/pipelines/{namespace}/{name}/runs",
@@ -512,11 +551,39 @@
       "query_params": [],
       "body": false
     },
+    "saved_queries_share": {
+      "method": "POST",
+      "path": "/api/saved-queries/{id}/share",
+      "path_params": [
+        "id"
+      ],
+      "query_params": [],
+      "body": true
+    },
+    "saved_queries_unshare": {
+      "method": "DELETE",
+      "path": "/api/saved-queries/{id}/share/{group}",
+      "path_params": [
+        "id",
+        "group"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "service_principals_list": {
       "method": "GET",
       "path": "/api/service-principals",
       "path_params": [],
       "query_params": [],
+      "body": false
+    },
+    "stages_compare": {
+      "method": "GET",
+      "path": "/api/stages/compare",
+      "path_params": [],
+      "query_params": [
+        "peer"
+      ],
       "body": false
     },
     "statements_cancel": {
@@ -661,6 +728,27 @@
     "warehouses_list": {
       "method": "GET",
       "path": "/api/warehouses",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
+    "workspace_get": {
+      "method": "GET",
+      "path": "/api/workspace",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
+    "workspace_start": {
+      "method": "POST",
+      "path": "/api/workspace/start",
+      "path_params": [],
+      "query_params": [],
+      "body": false
+    },
+    "workspace_stop": {
+      "method": "POST",
+      "path": "/api/workspace/stop",
       "path_params": [],
       "query_params": [],
       "body": false

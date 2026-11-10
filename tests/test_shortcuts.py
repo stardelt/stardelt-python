@@ -35,12 +35,22 @@ def test_a_resource_with_one_operation_and_no_verb_is_the_operation():
 
 
 def test_every_operation_id_can_be_reached_by_its_words():
+    # The invariant is "every operation whose resource is not a command word is reachable by its
+    # words": a first-class command owns its word (L7a).
     for operation_id, op in OPS.items():
         resource, verb = shortcuts._split(operation_id)
+        if resource in shortcuts.COMMANDS:
+            # A first-class command owns its word (`lineage`, L7a); its operations stay reachable
+            # through `stardelt api <operation_id>`, and the command's parser never calls expand.
+            continue
         argv = [resource] + ([verb] if verb else []) + [f"v{i}" for i, _ in enumerate(op["path_params"])]
         expanded = shortcuts.expand(argv, OPS)
         assert expanded[:2] == ["api", operation_id], operation_id
         assert expanded.count("-p") == len(op["path_params"]), operation_id
+
+
+def test_a_command_wins_over_its_resource_words():
+    assert shortcuts.expand(["lineage", "mobility.gold.kpis"], OPS) == ["lineage", "mobility.gold.kpis"]
 
 
 def test_commands_options_and_unknown_words_are_left_alone():
