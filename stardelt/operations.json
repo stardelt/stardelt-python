@@ -231,6 +231,13 @@
       "query_params": [],
       "body": false
     },
+    "migrations_plan": {
+      "method": "POST",
+      "path": "/api/migrations/plan",
+      "path_params": [],
+      "query_params": [],
+      "body": true
+    },
     "namespaces_list": {
       "method": "GET",
       "path": "/api/catalog/namespaces",
@@ -644,6 +651,23 @@
         "namespace",
         "name"
       ],
+      "query_params": [],
+      "body": true
+    },
+    "streams_put": {
+      "method": "PUT",
+      "path": "/api/streams/{namespace}/{name}",
+      "path_params": [
+        "namespace",
+        "name"
+      ],
+      "query_params": [],
+      "body": true
+    },
+    "streams_validate": {
+      "method": "POST",
+      "path": "/api/streams/validate",
+      "path_params": [],
       "query_params": [],
       "body": true
     },
