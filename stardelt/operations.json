@@ -29,7 +29,10 @@
       "query_params": [
         "q",
         "catalog",
-        "limit"
+        "limit",
+        "tag",
+        "owner",
+        "domain"
       ],
       "body": false
     },

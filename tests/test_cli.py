@@ -192,3 +192,14 @@ def test_the_console_script_is_declared_and_python_dash_m_works():
         [sys.executable, "-m", "stardelt", "--help"], capture_output=True, text=True, timeout=120
     )
     assert done.returncode == 0 and "usage: stardelt" in done.stdout
+
+
+def test_catalog_search_passes_the_tag_owner_and_domain_filters():
+    code, _, _, session = run(
+        ["catalog", "search", "-q", "q=revenue", "-q", "tag=finance", "-q", "owner=team-mobility", "-q", "domain=retail"],
+        FakeResponse(payload={"query": "revenue", "matches": [], "truncated": False}),
+    )
+    assert code == 0
+    method, url, kwargs = session.calls[0]
+    assert (method, url) == ("GET", "https://nova.example/api/catalog/search")
+    assert kwargs["params"] == {"q": "revenue", "tag": "finance", "owner": "team-mobility", "domain": "retail"}
