@@ -65,3 +65,20 @@ async def test_publish_turns_a_library_error_into_400(jp_fetch, monkeypatch):
 
     assert failure.value.code == 400
     assert json.loads(failure.value.response.body) == {"error": "no"}
+
+
+async def test_publish_info_turns_a_library_error_into_400(jp_fetch, monkeypatch):
+    # A server without its spawn token: the library raises, the dialog must get
+    # the sentence and a 400, not Tornado's generic 500 "Unhandled error".
+    def no_token():
+        raise RuntimeError("TRINO_TOKEN is not set — restart this server from the hub")
+
+    monkeypatch.setattr(stardelt, "_token", no_token)
+
+    with pytest.raises(HTTPClientError) as failure:
+        await jp_fetch("stardelt", "publish-info", params={"path": "a.ipynb"})
+
+    assert failure.value.code == 400
+    assert json.loads(failure.value.response.body) == {
+        "error": "TRINO_TOKEN is not set — restart this server from the hub"
+    }

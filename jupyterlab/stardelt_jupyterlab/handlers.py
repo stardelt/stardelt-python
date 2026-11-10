@@ -86,7 +86,15 @@ class PublishInfoHandler(_StardeltPublishHandler):
             self._not_installed()
             return
         stardelt, _groups, _publish = names
-        groups = _groups(stardelt._token())
+        try:
+            groups = _groups(stardelt._token())
+        except (ValueError, RuntimeError) as err:
+            # Same shape as PublishHandler.post(): the library's one-line
+            # sentence (for example "TRINO_TOKEN is not set …") instead of
+            # Tornado's generic 500 "Unhandled error".
+            self.set_status(400)
+            self.finish({"error": str(err)})
+            return
         # A schedule runs as one principal; with none or several groups there is
         # no single one to name, and the dialog leaves the line out.
         run_as = PIPELINE_PRINCIPAL.format(groups[0]) if len(groups) == 1 else ""
