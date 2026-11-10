@@ -592,12 +592,13 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
 
 
 def summary(nova, directory, target):
-    """What a deploy of ``target`` left on the stage, one row per pipeline: ``(problems, rows)``.
+    """What a deploy of ``target`` left on the stage, one row per object: ``(problems, rows)``.
 
-    The rows are the pipelines ``destroy`` would list (stamped with this bundle's name and this target; in a
+    The rows are the objects ``destroy`` would list (stamped with this bundle's name and this target; in a
     ``development`` target only the caller's own). Each row has the ``name`` and, when Nova knows them, the
     ``revision`` (Git commit) it was deployed from, ``deployedBy``, ``deployedAt`` and ``modified`` (true when someone changed
-    the pipeline after the deploy). Nothing is written.
+    the object after the deploy). A pipeline row is ``{"name": ...}``; a stream row carries ``"kind": "StreamApp"``.
+    Nothing is written.
     """
     problems, _, resolved = validate(directory, target)
     if problems:
@@ -614,6 +615,17 @@ def summary(nova, directory, target):
             if stamp.get(key) is not None:
                 row[key] = stamp[key]
         rows.append(row)
+    _, _, stream_specs = render_streams(directory, target, user)
+    if stream_specs:
+        _, listed = _listed(nova)
+        for stream in _deployed_streams(listed, provenance(directory, target)["bundle"], target, mode, user):
+            stamp = stream.get("deployment") or {}
+            row = {"name": stream["name"], "kind": "StreamApp"}
+            for key in ("revision", "deployedBy", "deployedAt", "modified"):
+                if stamp.get(key) is not None:
+                    row[key] = stamp[key]
+            rows.append(row)
+    rows.sort(key=lambda row: (row["name"], row.get("kind", "")))
     return [], rows
 
 
