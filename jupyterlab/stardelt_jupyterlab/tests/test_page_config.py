@@ -66,5 +66,5 @@ def test_the_publish_routes_are_registered():
     _load_jupyter_server_extension(server_app)
 
     paths = [path for _host, routes in server_app.web_app.handlers for path, _handler in routes]
-    assert paths == ["/stardelt/publish-info", "/stardelt/publish"]
+    assert paths == ["/stardelt/publish-info", "/stardelt/publish", "/stardelt/catalog"]
     assert server_app.web_app.settings["stardelt_root_dir"] == "/workspace"

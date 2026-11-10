@@ -1,8 +1,13 @@
-"""The server side of the Publish button: path safety, the publish call, its errors."""
+"""The server side of the Publish button: path safety, the publish call, its errors.
+
+The catalog route is tested here too: it is the same server extension and the
+same signed-in person.
+"""
 
 import importlib
 import json
 
+import pandas
 import pytest
 import stardelt
 from tornado.httpclient import HTTPClientError
@@ -82,3 +87,36 @@ async def test_publish_info_turns_a_library_error_into_400(jp_fetch, monkeypatch
     assert json.loads(failure.value.response.body) == {
         "error": "TRINO_TOKEN is not set — restart this server from the hub"
     }
+
+
+async def test_catalog_hides_engine_catalogs(jp_fetch, monkeypatch):
+    monkeypatch.setattr(
+        stardelt,
+        "sql",
+        lambda statement: pandas.DataFrame({"Catalog": ["mobility", "system"]}),
+    )
+
+    response = await jp_fetch("stardelt", "catalog")
+
+    assert response.code == 200
+    assert json.loads(response.body) == {"catalogs": ["mobility"]}
+
+
+async def test_catalog_refuses_a_non_name(jp_fetch):
+    with pytest.raises(HTTPClientError) as failure:
+        await jp_fetch("stardelt", "catalog", params={"catalog": 'evil"'})
+
+    assert failure.value.code == 400
+
+
+async def test_catalog_answers_a_warehouse_error_as_502(jp_fetch, monkeypatch):
+    def no_token(statement):
+        raise RuntimeError("no token")
+
+    monkeypatch.setattr(stardelt, "sql", no_token)
+
+    with pytest.raises(HTTPClientError) as failure:
+        await jp_fetch("stardelt", "catalog")
+
+    assert failure.value.code == 502
+    assert json.loads(failure.value.response.body) == {"error": "no token"}
