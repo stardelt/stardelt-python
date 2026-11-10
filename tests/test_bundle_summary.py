@@ -5,7 +5,7 @@ import json
 
 from stardelt import cli
 from tests.test_api import CANARY, FakeResponse, FakeSession
-from tests.test_bundle import make
+from tests.test_bundle import LOAD, NIGHTLY, make
 
 ENV = {"STARDELT_NOVA_URL": "https://nova.example", "STARDELT_TOKEN": CANARY}
 ME = FakeResponse(payload={"user": "alice"})
@@ -25,6 +25,33 @@ def stamped(name, bundle_name="sales-etl", target="prod", **more):
         "ownerGroup": "sales",
         "deployment": {"bundle": bundle_name, "target": target, **more},
     }
+
+
+STREAM = (
+    "kind: StreamApp\nname: measurements\nownerGroup: sales\nsource: {topic: t}\n"
+    "sink: {catalog: c, table: s.t, mode: merge, mergeKeys: [id]}\n"
+)
+
+STREAMS = {
+    "namespace": "stardelt",
+    "streams": [
+        {
+            "name": "measurements",
+            "namespace": "stardelt",
+            "owner_group": "sales",
+            "deployment": {
+                "bundle": "sales-etl",
+                "target": "prod",
+                "revision": "0123abc",
+                "deployedBy": "ada",
+                "deployedAt": "2026-11-01T08:00:02Z",
+                "modified": True,
+            },
+        },
+        {"name": "theirs", "namespace": "stardelt", "owner_group": "sales", "deployment": {"bundle": "other-bundle", "target": "prod"}},
+        {"name": "by-hand", "namespace": "stardelt", "owner_group": "sales"},
+    ],
+}
 
 
 LISTING = {
@@ -68,6 +95,57 @@ def test_a_development_target_shows_only_the_callers_own_pipelines(tmp_path):
     code, out, _, _ = run(["bundle", "summary", str(tmp_path), "-t", "dev"], ME, FakeResponse(payload=listing))
     assert code == 0
     assert [json.loads(line)["name"] for line in out.splitlines()] == ["dev-alice-load"]
+
+
+def test_a_stream_the_deploy_left_is_listed_with_its_kind_beside_the_pipelines(tmp_path):
+    make(tmp_path, resources={"load.yaml": LOAD, "nightly.yaml": NIGHTLY, "measurements.yaml": STREAM})
+    code, out, err, session = run(
+        ["bundle", "summary", str(tmp_path), "-t", "prod"],
+        ME,
+        FakeResponse(payload=LISTING),
+        FakeResponse(payload=STREAMS),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"name": "bare"},
+        {"name": "load", "revision": "0123abc-dirty", "deployedBy": "ada", "deployedAt": "2026-11-01T08:00:01Z"},
+        {
+            "name": "measurements",
+            "kind": "StreamApp",
+            "revision": "0123abc",
+            "deployedBy": "ada",
+            "deployedAt": "2026-11-01T08:00:02Z",
+            "modified": True,
+        },
+        {
+            "name": "nightly",
+            "revision": "0123abc",
+            "deployedBy": "ada",
+            "deployedAt": "2026-11-01T08:00:00Z",
+            "modified": True,
+        },
+    ]
+    assert "theirs" not in out and "by-hand" not in out, "only streams stamped by this bundle and target are listed"
+    assert [m for m, _ in [(m, u) for m, u, _ in session.calls]] == ["GET", "GET", "GET"], "a summary only reads"
+
+
+def test_a_development_target_shows_only_the_callers_own_streams(tmp_path):
+    make(tmp_path, resources={"load.yaml": LOAD, "nightly.yaml": NIGHTLY, "measurements.yaml": STREAM})
+    streams = {
+        "namespace": "stardelt",
+        "streams": [
+            {"name": "dev-alice-measurements", "namespace": "stardelt", "deployment": {"bundle": "sales-etl", "target": "dev"}},
+            {"name": "dev-bob-measurements", "namespace": "stardelt", "deployment": {"bundle": "sales-etl", "target": "dev"}},
+        ],
+    }
+    code, out, _, _ = run(
+        ["bundle", "summary", str(tmp_path), "-t", "dev"],
+        ME,
+        FakeResponse(payload={"pipelines": []}),
+        FakeResponse(payload=streams),
+    )
+    assert code == 0
+    assert [json.loads(line)["name"] for line in out.splitlines()] == ["dev-alice-measurements"]
 
 
 def test_nothing_deployed_says_so(tmp_path):
