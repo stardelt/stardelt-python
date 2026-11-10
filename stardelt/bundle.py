@@ -6,6 +6,7 @@ principal is ready or a notebook version exists); it catches what a pull request
 """
 
 import difflib
+import hashlib
 import json
 import re
 import subprocess
@@ -15,7 +16,7 @@ import yaml
 
 from stardelt import api, apply, runs
 
-KEYS = {"bundle", "variables", "include", "files", "requires", "targets"}
+KEYS = {"bundle", "variables", "include", "files", "migrations", "requires", "targets"}
 KINDS = ("Pipeline", "StreamApp")
 PIPELINE_ONLY = ("sql", "sqlFile", "notebook", "schedule", "params")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
@@ -24,6 +25,8 @@ VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 CONNECTION = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 USE = re.compile(r"\$\{var\.([A-Za-z0-9_]+)\}")
 NOTEBOOK_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.ipynb$")
+MIGRATION = re.compile(r"^\d{3}_[a-z0-9_]+\.sql$")
+CATALOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MODES = ("development", "production")
 DRIFT = ("warn", "block")
 MAX_FILES = 100
@@ -61,6 +64,35 @@ def _files(root, patterns, what, problems):
         if not matched:
             problems.append((what, f"{pattern}: matches no file"))
     return sorted(found)
+
+
+def _migrations(root, spec, problems):
+    """The migration files of a ``migrations:`` block as ``[{name, sha256, sql}]``, sorted by name.
+
+    ``name`` is the file's basename, ``sha256`` the hash of its bytes and ``sql`` those bytes decoded as
+    UTF-8: Nova compares the hash with its ledger, so a changed file is refused rather than re-run.
+    """
+    if not isinstance(spec, dict):
+        problems.append(("migrations", "must be a mapping with catalog and files"))
+        return []
+    for key in sorted(set(spec) - {"catalog", "files"}):
+        problems.append(("migrations", f"unknown key {key!r} (known: catalog, files)"))
+    catalog = spec.get("catalog")
+    if not (isinstance(catalog, str) and CATALOG.match(catalog)):
+        problems.append(("migrations.catalog", "must be a catalog name: 1 to 63 characters, lower-case letters, digits and dashes, starting with a letter or digit"))
+    out, seen = [], set()
+    for relative in _files(root, spec.get("files"), "migrations.files", problems):
+        name = PurePosixPath(relative).name
+        if not MIGRATION.match(name):
+            problems.append((relative, "a migration is named NNN_<words>.sql: three digits, an underscore, then lower-case letters, digits and underscores"))
+            continue
+        if name in seen:
+            problems.append((relative, f"two migration files are named {name}"))
+            continue
+        seen.add(name)
+        raw = (root / relative).read_bytes()
+        out.append({"name": name, "sha256": hashlib.sha256(raw).hexdigest(), "sql": raw.decode("utf-8")})
+    return sorted(out, key=lambda migration: migration["name"])
 
 
 def _substitute(text, values, problems, where):
@@ -148,6 +180,8 @@ def validate(directory, target=None):
     sources = _files(root, manifest.get("include"), "include", problems) if "include" in manifest else []
     if "include" not in manifest:
         problems.append(("include", "is required: the pipeline files of the bundle"))
+    if "migrations" in manifest:
+        _migrations(root, manifest["migrations"], problems)
 
     targets = manifest.get("targets")
     if not isinstance(targets, dict) or not targets:
@@ -441,6 +475,35 @@ def _drift_mode(directory, target):
     return ((manifest.get("targets") or {}).get(target) or {}).get("drift", "warn")
 
 
+def _migration_files(directory, target):
+    """The bundle's migrations for ``target``: ``(problems, catalog, files)``; ``files`` is empty when it has none."""
+    root = Path(directory)
+    manifest = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))
+    if "migrations" not in manifest:
+        return [], None, []
+    problems = []
+    files = _migrations(root, manifest["migrations"], problems)
+    catalog = (manifest["migrations"] or {}).get("catalog") if isinstance(manifest.get("migrations"), dict) else None
+    return problems, catalog, ([] if problems else files)
+
+
+def _migration_plan(nova, target, catalog, files):
+    """The ``migrations_plan`` answer as result rows: ``(problems, rows)``."""
+    try:
+        answer = nova.call("migrations_plan", body={"catalog": catalog, "target": target, "files": files})
+    except api.StardeltApiError as err:
+        return [(target, f"migrations: {err}")], []
+    if not answer["ok"]:
+        return [(target, f"migrations: {message}") for message in answer["errors"]], []
+    rows = []
+    for planned in answer["files"]:
+        if planned["status"] == "applied":
+            rows.append({"action": "migration-in-ledger", "name": planned["name"]})
+        else:
+            rows.append({"action": "would-apply-migration", "name": planned["name"], "class": planned["class"]})
+    return [], rows
+
+
 def _notebook(spec):
     """The notebook of a pipeline spec when it is a file of the bundle (``notebook: {file: ...}``), else ``None``."""
     notebook = spec.get("notebook")
@@ -483,7 +546,7 @@ def _blocked(target, names):
     ]
 
 
-def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False, diff=False):
+def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=False, diff=False, allow_breaking=False):
     """Plan, then (unless ``dry_run``) deploy ``target``: ``(problems, results)``.
 
     ``nova`` is a ``stardelt.api.Client``. Every pipeline is first checked by Nova (``pipelines_validate``, the
@@ -502,13 +565,19 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
     problems, mode, specs = render(directory, target, user)
     if problems:
         return problems, []
+    migration_problems, migration_catalog, migration_files = _migration_files(directory, target)
+    if migration_problems:
+        return migration_problems, []
     stamp = provenance(directory, target)
     specs = [{**spec, "provenance": stamp} for spec in specs]
     stream_problems, _, stream_specs = render_streams(directory, target, user)
     if stream_problems:
         return stream_problems, []
     stream_specs = [{**spec, "provenance": stamp} for spec in stream_specs]
-    results, refused, changed_by_hand, unpublished = [], [], set(), []
+    migration_problems, migration_rows = _migration_plan(nova, target, migration_catalog, migration_files) if migration_files else ([], [])
+    if migration_problems:
+        return migration_problems, []
+    results, refused, changed_by_hand, unpublished = list(migration_rows), [], set(), []
     for position, spec in enumerate(specs):
         if _notebook(spec):
             try:
@@ -553,7 +622,7 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
     results += [{"action": "would-delete", "name": name} for _, name in stale]
     if refused or dry_run:
         return refused, results
-    done = []
+    done = list(migration_rows)
     for position in unpublished:
         spec = specs[position]
         try:
@@ -570,6 +639,21 @@ def deploy(nova, directory, target, dry_run=False, prune=False, accept_drift=Fal
             changed_by_hand.add(spec["name"])
     if changed_by_hand and not accept_drift and _drift_mode(directory, target) == "block":
         return _blocked(target, changed_by_hand), done
+    if migration_files:
+        try:
+            answer = nova.call(
+                "migrations_apply",
+                body={"catalog": migration_catalog, "target": target, "files": migration_files, "allowBreaking": allow_breaking},
+            )
+        except api.StardeltApiError as err:
+            return [(target, f"migrations: {err}")], results
+        if not answer["ok"]:
+            return [(target, f"migrations: {message}") for message in answer["errors"]], results
+        applied = set(answer["applied"])
+        for row in results:
+            if row["action"] == "would-apply-migration" and row["name"] in applied:
+                row["action"] = "migration-applied"
+                row.pop("class", None)
     done += [
         {
             **apply.apply(nova, spec),
