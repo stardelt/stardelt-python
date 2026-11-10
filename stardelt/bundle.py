@@ -246,12 +246,27 @@ def _revision(root):
         return None
 
 
+def _repository(root):
+    """The web address of ``origin`` (``https://host/org/repo``), without user, token, port or ``.git``;
+    ``None`` when there is no Git checkout, no ``origin``, or a URL this cannot read."""
+    try:
+        done = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
+                              capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    url = done.stdout.strip() if done.returncode == 0 else ""
+    match = (re.fullmatch(r"[\w.-]+@([\w.-]+):([\w./-]+?)(?:\.git)?/?", url)
+             or re.fullmatch(r"(?:ssh|https?)://(?:[^@/]+@)?([\w.-]+)(?::\d+)?/([\w./-]+?)(?:\.git)?/?", url))
+    return f"https://{match.group(1)}/{match.group(2)}" if match else None
+
+
 def provenance(directory, target):
-    """What a deploy tells Nova about where its pipelines came from: ``{bundle, target[, revision]}``."""
+    """What a deploy tells Nova about where its pipelines came from: ``{bundle, target[, revision][, repository]}``."""
     root = Path(directory)
     name = yaml.safe_load((root / "bundle.yaml").read_text(encoding="utf-8"))["bundle"]["name"]
     revision = _revision(root)
-    return {"bundle": name, "target": target, **({"revision": revision} if revision else {})}
+    repository = _repository(root)
+    return {"bundle": name, "target": target, **({"revision": revision} if revision else {}), **({"repository": repository} if repository else {})}
 
 
 def _deployed(nova, bundle_name, target, mode, user):
