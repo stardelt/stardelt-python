@@ -194,3 +194,72 @@ def test_a_refused_production_deploy_prints_nova_s_sentence(tmp_path):
     assert code == 2
     assert err.startswith("stardelt: prod: migrations: ")
     assert sentence in err
+
+
+BREAKING = {
+    "sql/migrations/001_init.sql": "create table trips (id int)",
+    "sql/migrations/002_drop.sql": "drop table warehouse.sales.trips",
+}
+BREAKING_PLAN = {
+    "ok": True,
+    "ledger": True,
+    "planId": "",
+    "approvable": False,
+    "files": [
+        {"name": "001_init.sql", "sha256": "a" * 64, "class": "additive", "status": "applied", "statements": 1},
+        {"name": "002_drop.sql", "sha256": "b" * 64, "class": "breaking", "status": "new", "statements": 1,
+         "reason": "drop table warehouse.sales.trips"},
+    ],
+    "errors": [],
+}
+IMPACT = {"nodes": [], "edges": [], "jobs": [], "impact": {"downstream": 3, "upstream": 0, "downstreamJobs": 2}}
+
+
+def test_a_breaking_migration_names_the_table_and_its_downstream_count(tmp_path):
+    build(tmp_path, migrations=BREAKING)
+    code, out, err, session = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=BREAKING_PLAN), FakeResponse(payload=IMPACT), FakeResponse(payload=CREATE),
+    )
+    assert (code, err) == (0, "")
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {"action": "migration-in-ledger", "name": "001_init.sql"},
+        {"action": "would-apply-migration", "name": "002_drop.sql", "class": "breaking",
+         "impact": {"table": "warehouse.sales.trips", "downstream": 3, "downstreamJobs": 2}},
+        {"action": "would-create", "name": "load", "nextRuns": ["2026-11-02T03:00:00+01:00"]},
+    ]
+    assert calls(session) == [
+        ("GET", "/api/me"),
+        ("POST", "/api/migrations/plan"),
+        ("GET", "/api/lineage"),
+        ("POST", "/api/pipelines/validate"),
+    ]
+    assert session.calls[2][2]["params"] == {
+        "catalog": "warehouse", "schema": "sales", "table": "trips", "depth": 1, "days": 30,
+    }
+
+
+def test_a_breaking_file_without_a_table_draws_no_impact_line_and_makes_no_extra_call(tmp_path):
+    build(tmp_path, migrations={**BREAKING, "sql/migrations/002_drop.sql": "insert into warehouse.sales.trips values (1)"})
+    plan = {**BREAKING_PLAN, "files": [BREAKING_PLAN["files"][0], {**BREAKING_PLAN["files"][1], "reason": "insert into warehouse.sales.trips values (1)"}]}
+    code, out, err, session = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=plan), FakeResponse(payload=CREATE),
+    )
+    assert (code, err) == (0, "")
+    rows = [json.loads(line) for line in out.splitlines()]
+    assert rows[1] == {"action": "would-apply-migration", "name": "002_drop.sql", "class": "breaking"}
+    assert calls(session) == [("GET", "/api/me"), ("POST", "/api/migrations/plan"), ("POST", "/api/pipelines/validate")]
+
+
+def test_an_unavailable_lineage_answer_leaves_the_plan_intact(tmp_path):
+    build(tmp_path, migrations=BREAKING)
+    code, out, err, session = run(
+        ["bundle", "plan", str(tmp_path), "-t", "prod"],
+        ME, FakeResponse(payload=BREAKING_PLAN), FakeResponse(status=503, payload={"error": "the state store is not configured"}),
+        FakeResponse(payload=CREATE),
+    )
+    assert (code, err) == (0, "")
+    rows = [json.loads(line) for line in out.splitlines()]
+    assert rows[1] == {"action": "would-apply-migration", "name": "002_drop.sql", "class": "breaking"}
+    assert calls(session)[2] == ("GET", "/api/lineage")
