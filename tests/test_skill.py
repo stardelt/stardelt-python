@@ -38,3 +38,9 @@ def test_write_into_a_place_that_cannot_be_written_is_an_error_with_a_sentence(t
     blocker.write_text("not a directory")
     code, out, err = run(["skill", "--write", str(blocker)])
     assert (code, out) == (1, "") and err.startswith("stardelt: ")
+
+
+def test_the_skill_teaches_lineage_and_bundles():
+    text = skill.text()
+    assert "stardelt lineage" in text
+    assert "stardelt bundle plan" in text and "stardelt bundle deploy" in text
