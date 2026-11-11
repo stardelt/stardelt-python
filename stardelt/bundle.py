@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from stardelt import api, apply, runs
+from stardelt import api, apply, lineage, runs
 
 KEYS = {"bundle", "variables", "include", "files", "migrations", "requires", "targets"}
 KINDS = ("Pipeline", "StreamApp")
@@ -27,6 +27,12 @@ USE = re.compile(r"\$\{var\.([A-Za-z0-9_]+)\}")
 NOTEBOOK_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.ipynb$")
 MIGRATION = re.compile(r"^\d{3}_[a-z0-9_]+\.sql$")
 CATALOG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+# A migration statement that names a table whose change can have downstream impact. Only the
+# statements the pattern can read without a SQL grammar; anything else draws no impact line.
+CHANGE = re.compile(
+    r"(?is)\b(?:drop|truncate)\s+table(?:\s+if\s+exists)?\s+([a-z0-9_.]+)"
+    r"|\balter\s+table(?:\s+if\s+exists)?\s+([a-z0-9_.]+)"
+)
 MODES = ("development", "production")
 DRIFT = ("warn", "block")
 MAX_FILES = 100
@@ -500,8 +506,44 @@ def _migration_plan(nova, target, catalog, files):
         if planned["status"] == "applied":
             rows.append({"action": "migration-in-ledger", "name": planned["name"]})
         else:
-            rows.append({"action": "would-apply-migration", "name": planned["name"], "class": planned["class"]})
+            row = {"action": "would-apply-migration", "name": planned["name"], "class": planned["class"]}
+            if planned["class"] == "breaking":
+                sql = next((f["sql"] for f in files if f["name"] == planned["name"]), "")
+                impact = _impact(nova, catalog, sql)
+                if impact is not None:
+                    row["impact"] = impact
+            rows.append(row)
     return [], rows, answer.get("planId", "")
+
+
+def _impact(nova, catalog, sql):
+    """The table a breaking migration changes and its downstream closure, or ``None``.
+
+    ``sql`` is the file's text. The first ``DROP TABLE``/``TRUNCATE TABLE``/``ALTER TABLE`` that
+    names an unquoted table is used; a one-part name cannot be resolved without a schema, so it
+    draws no line. The count is Nova's ``impact.downstream`` (nova#646 L8a): every visible table
+    downstream at any number of steps in the last 30 days. An unanswerable lineage call leaves the
+    plan exactly as it was: a plan must not fail because lineage is unavailable.
+    """
+    match = CHANGE.search(sql or "")
+    if match is None:
+        return None
+    name = (match.group(1) or match.group(2) or "").strip(".")
+    parts = name.split(".")
+    if len(parts) == 2:
+        parts = [catalog] + parts
+    if len(parts) != 3 or not all(parts):
+        return None
+    table = ".".join(parts)
+    try:
+        answer = lineage.graph(nova, table, depth=1, days=30)
+    except (api.StardeltApiError, lineage.TableRefError):
+        return None
+    impact = answer.get("impact") or {}
+    downstream = impact.get("downstream")
+    if not isinstance(downstream, int):
+        return None
+    return {"table": table, "downstream": downstream, "downstreamJobs": impact.get("downstreamJobs", 0)}
 
 
 def _notebook(spec):
