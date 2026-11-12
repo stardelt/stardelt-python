@@ -72,6 +72,14 @@ def test_the_compute_operations_are_in_the_contract():
     }
 
 
+def test_the_pipeline_retry_operation_is_in_the_contract():
+    op = api.operations()["pipelines_run_retry"]
+    assert op["method"] == "POST"
+    assert op["path"] == "/api/pipelines/{namespace}/{name}/runs/{run_id}/retry"
+    assert op["path_params"] == ["namespace", "name", "run_id"]
+    assert op["body"] is False
+
+
 def test_stardelt_compute_start_is_a_shortcut_for_the_start_operation():
     code, out, err, session = run(
         ["compute", "start", "trial"],
