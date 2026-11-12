@@ -13,6 +13,7 @@ import sys
 import time
 import types
 
+import certifi
 import pandas as pd
 import pytest
 
@@ -438,8 +439,8 @@ def pipeline_env(trino, monkeypatch):
     monkeypatch.setenv("PIPELINE_CLIENT_SECRET", "canary-secret-1f3a")
     calls = []
 
-    def post(url, data=None, timeout=None):
-        calls.append((url, dict(data), timeout))
+    def post(url, data=None, timeout=None, verify=None):
+        calls.append((url, dict(data), timeout, verify))
         return _Reply()
 
     monkeypatch.setattr(stardelt.requests, "post", post)
@@ -458,12 +459,20 @@ def test_hub_token_is_used_unchanged(trino, monkeypatch):
 
 def test_client_credentials_used_when_the_hub_token_is_absent(trino, pipeline_env):
     stardelt.sql("SELECT 1")
-    url, data, timeout = pipeline_env[0]
+    url, data, timeout, verify = pipeline_env[0]
     assert url == "https://idp.example/token"
     assert data["grant_type"] == "client_credentials"
     assert data["client_id"] == "sp-analytics"
     assert timeout == 15
+    assert verify == certifi.where()
     assert os.environ["TRINO_TOKEN"] == "fresh.token.value"
+
+
+def test_the_token_post_ignores_the_pod_ca_bundle(trino, pipeline_env, monkeypatch):
+    """The engine's CA must not decide the identity provider's trust (platform#1094)."""
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/etc/stardelt/trino-ca/ca.crt")
+    stardelt._fetch_token()
+    assert pipeline_env[0][3] == certifi.where()
 
 
 class _HubReply:

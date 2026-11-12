@@ -39,6 +39,7 @@ import uuid
 import warnings
 from urllib.parse import urlsplit
 
+import certifi
 import pandas as pd
 import requests
 from trino.auth import Authentication, JWTAuthentication
@@ -145,6 +146,9 @@ def _fetch_token():
             "client_id": client_id,
             "client_secret": os.environ["PIPELINE_CLIENT_SECRET"].strip(),
         },
+        # The pod's REQUESTS_CA_BUNDLE is the warehouse's internal CA; the identity
+        # endpoint's certificate is public (stardelt-platform#1094, same rule as publish.py).
+        verify=certifi.where(),
         timeout=15,
     )
     if response.status_code != 200:
