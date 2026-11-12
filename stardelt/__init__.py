@@ -236,6 +236,9 @@ def _connect(live=False):
 
     ``live=True`` re-reads the token on every request (renewing it near expiry), for a
     connection that stays open; the default fixes the token when the connection opens.
+
+    The ``notebook`` client tag names the notebook a query came from: Nova's query-log
+    collector reads it, so the lineage graph says "read by work/trips.ipynb", not by a person.
     """
     url = os.environ.get("TRINO_URL", "").strip()
     if not url:
@@ -245,12 +248,21 @@ def _connect(live=False):
     # (`preferred_username` or `sub`, whatever the platform configured), and denies a request
     # whose declared user differs from it ("user X cannot impersonate user Y").
     parts = urlsplit(url)
+    # Jupyter Server sets this to the notebook's path inside the server root; a terminal
+    # kernel or a laptop CLI does not set it. Trino splits the header on commas, hence the
+    # replacement.
+    notebook = os.environ.get("JPY_SESSION_NAME", "").strip().replace(",", "_")
+    kwargs = {}
+    if notebook:
+        # Omitted, not empty: an empty list would send an empty X-Trino-Client-Tags header.
+        kwargs["client_tags"] = [f"notebook={notebook}"]
     return _trino_connect(
         host=parts.hostname,
         port=parts.port or (443 if parts.scheme == "https" else 8080),
         http_scheme=parts.scheme,
         auth=_LiveAuthentication() if live else JWTAuthentication(token),
         source="stardelt-notebook-helper",
+        **kwargs,
     )
 
 
