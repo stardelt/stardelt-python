@@ -127,6 +127,19 @@ def test_sql_declares_no_user_even_in_a_hub_pod(trino, monkeypatch):
     assert "user" not in trino.instances[-1].kwargs
 
 
+def test_connect_tags_the_notebook_path(trino, monkeypatch):
+    # Nova's query-log collector reads the tag to attribute the query to the notebook.
+    monkeypatch.setenv("JPY_SESSION_NAME", "work/trips.ipynb")
+    stardelt.sql("SELECT 1")
+    assert trino.instances[-1].kwargs["client_tags"] == ["notebook=work/trips.ipynb"]
+
+
+def test_connect_without_a_kernel_sends_no_tag(trino, monkeypatch):
+    monkeypatch.delenv("JPY_SESSION_NAME", raising=False)
+    stardelt.sql("SELECT 1")
+    assert "client_tags" not in trino.instances[-1].kwargs
+
+
 def test_sql_passes_params_through(trino):
     stardelt.sql("SELECT * FROM t WHERE borough = ?", params=("Queens",))
     stmt, params = trino.instances[-1].statements[-1]
