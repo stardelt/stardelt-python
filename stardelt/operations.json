@@ -218,6 +218,16 @@
       ],
       "body": false
     },
+    "lineage_read_tables": {
+      "method": "GET",
+      "path": "/api/lineage/read-tables",
+      "path_params": [],
+      "query_params": [
+        "days",
+        "limit"
+      ],
+      "body": false
+    },
     "lineage_run_detail": {
       "method": "GET",
       "path": "/api/lineage/runs/{run_id}",
@@ -430,6 +440,17 @@
       "query_params": [],
       "body": false
     },
+    "pipelines_run_retry": {
+      "method": "POST",
+      "path": "/api/pipelines/{namespace}/{name}/runs/{run_id}/retry",
+      "path_params": [
+        "namespace",
+        "name",
+        "run_id"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "pipelines_run_stop": {
       "method": "POST",
       "path": "/api/pipelines/{namespace}/{name}/runs/{run_id}/stop",
@@ -548,7 +569,8 @@
         "state",
         "kind",
         "group",
-        "pipeline"
+        "pipeline",
+        "notebook"
       ],
       "body": false
     },
