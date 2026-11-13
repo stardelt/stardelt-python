@@ -16,7 +16,8 @@ dependencies = ["pandas", "requests", "trino", "certifi", "pyyaml"]
 # a newer client mis-parses the server's settings and every createDataFrame fails
 # with an opaque int() error (platform#399). The notebook image pins the exact
 # version; this range states what the library is tested against.
-spark = ["pyspark[connect]>=4.1,<4.3"]
+# pyspark-client is the Connect-only package: no Spark jars, same import name.
+spark = ["pyspark-client>=4.1,<4.3"]
 jupyter = ["jupysql", "ipython", "sqlalchemy"]
 test = ["pytest"]
 
