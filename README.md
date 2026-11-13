@@ -19,7 +19,7 @@ package, so `help(stardelt.spark)` points at the same text.
 
 | | version | why it matters |
 |---|---|---|
-| Spark Connect **client** (`pyspark[connect]`) | same Spark line as the server: `4.1.x` | a newer client mis-parses the server's settings (`3221225472b`) and every `createDataFrame` fails with an opaque `int()` error |
+| Spark Connect **client** (`pyspark-client`) | same Spark line as the server: `4.1.x` | a newer client mis-parses the server's settings (`3221225472b`) and every `createDataFrame` fails with an opaque `int()` error |
 | Trino (the `trino` client) | 0.340 | the `sql()` and `write_df()` paths |
 | pandas | 2.2.x | the frames the notebook hands over |
 
