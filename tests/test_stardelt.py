@@ -700,6 +700,7 @@ def test_sets_catalog_conf_for_visible_names_only(fake_spark, visible_catalogs):
         assert session.configs[f"spark.sql.catalog.{name}.type"] == "rest"
         assert session.configs[f"spark.sql.catalog.{name}.warehouse"] == name
         assert session.configs[f"spark.sql.catalog.{name}.token"] == "canary-token-317"
+        assert session.configs[f"spark.sql.catalog.{name}.rest-catalog-purge"] == "true"
         assert (
             session.configs[f"spark.sql.catalog.{name}.io-impl"]
             == "org.apache.iceberg.aws.s3.S3FileIO"

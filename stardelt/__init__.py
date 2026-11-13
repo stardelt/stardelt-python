@@ -823,6 +823,10 @@ def spark(app_name="stardelt-notebook", cluster=None):
     a catalog the person has no grant on. ``STARDELT_CATALOG_URI`` and
     ``STARDELT_S3_ENDPOINT`` override the in-cluster catalog and S3 endpoints.
 
+    The session sets ``rest-catalog-purge=true`` per catalog: the catalog purges on the
+    server, so a drop (with or without ``PURGE``) removes the files once and cannot race
+    a client-side purge (stardelt-platform#1127).
+
     The catalogs and the token are set on the new session before its first catalog
     call (Spark reads ``spark.sql.catalog.*`` then). Setting the token again on a
     live session does not re-key an initialized catalog, so a later call with a
@@ -873,6 +877,11 @@ def spark(app_name="stardelt-notebook", cluster=None):
             )
             for key, value in (
                 ("type", "rest"),
+                # The catalog purges on the server (Lakekeeper defaults `purgeRequested` to
+                # true). Without this Iceberg's SparkCatalog drops *without* the parameter and
+                # then runs its own client-side purge, which races the server's and fails with
+                # NoSuchKey after the table is gone (stardelt-platform#1127, measured 2/2).
+                ("rest-catalog-purge", "true"),
                 ("uri", catalog_uri),
                 ("warehouse", name),
                 ("token", token),
