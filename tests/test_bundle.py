@@ -208,3 +208,66 @@ def test_the_init_command_says_what_it_wrote_and_exits_2_on_a_mistake(tmp_path):
     out, err = io.StringIO(), io.StringIO()
     code = cli.main(["bundle", "init", str(tmp_path / "b"), "--name", "shop-etl", "--group", "shop"], environ={}, stdout=out, stderr=err)
     assert code == 2 and "already exists" in err.getvalue()
+
+
+TASK_FILES = {
+    "sql/schema.sql": "create table gold.schema (id bigint);\n",
+    "sql/customers.sql": "select 1\n",
+    "notebooks/explore.ipynb": "{}",
+}
+
+
+def task_bundle(directory, tasks, extra=""):
+    """A bundle whose one resource file gives ``tasks`` (one YAML block entry per string)."""
+    resource = "name: shop-gold\n" + extra + "tasks:\n" + "".join(f"  - {task}\n" for task in tasks)
+    return make(directory, resources={"gold.yaml": resource}, files=dict(TASK_FILES))
+
+
+def test_a_pipeline_may_carry_several_tasks(tmp_path):
+    task_bundle(tmp_path, ["{name: schema, sqlFile: sql/schema.sql}", "{name: customers, sqlFile: sql/customers.sql, dependsOn: [schema]}"])
+    assert bundle.validate(tmp_path)[0] == []
+    problems, mode, specs = bundle.render(tmp_path, "prod", "alice")
+    assert (problems, mode) == ([], "production")
+    assert specs == [
+        {
+            "name": "shop-gold",
+            "tasks": [
+                {"name": "schema", "sql": "create table gold.schema (id bigint);\n"},
+                {"name": "customers", "sql": "select 1\n", "dependsOn": ["schema"]},
+            ],
+            "ownerGroup": "sales",
+        }
+    ]
+
+
+def test_a_task_problem_names_the_file_and_the_task(tmp_path):
+    task_bundle(tmp_path, ["{name: customer_ltv, sql: select 1, sqlFile: sql/schema.sql}"])
+    problems, _, _ = bundle.validate(tmp_path, "prod")
+    assert problems[0][0] == "resources/gold.yaml (prod), task 'customer_ltv'"
+    assert problems[0][1] == "give exactly one of sql, sqlFile or notebook"
+
+
+def test_task_rules_are_reported(tmp_path):
+    rows = [
+        (["{name: x, sql: select 1, sqlFile: sql/schema.sql}"], "task 'x': give exactly one of sql, sqlFile or notebook"),
+        (["{name: x, sql: select 1}", "{name: x, sql: select 2}"], "the name is used twice"),
+        (["{name: x, sql: select 1, dependsOn: [nope]}"], "dependsOn names 'nope'"),
+        (["{name: a, sql: select 1, dependsOn: [b]}", "{name: b, sql: select 2, dependsOn: [a]}"], "dependsOn is a cycle"),
+        (["{name: x, sqlFile: sql/nope.sql}"], "is not among the bundle's files"),
+        ([f"{{name: t{index}, sql: select 1}}" for index in range(31)], "at most 30 tasks"),
+        (
+            [*(f"{{name: dep{index}, sql: select 1}}" for index in range(9)), "{name: x, sql: select 1, dependsOn: [dep0, dep1, dep2, dep3, dep4, dep5, dep6, dep7, dep8]}"],
+            "at most 8 dependsOn entries",
+        ),
+    ]
+    for index, (tasks, expected) in enumerate(rows):
+        directory = tmp_path / f"row{index}"
+        directory.mkdir()
+        task_bundle(directory, tasks)
+        problems = said(bundle.validate(directory)[0])
+        assert expected in problems, problems
+
+
+def test_a_pipeline_cannot_give_both_tasks_and_one_source(tmp_path):
+    task_bundle(tmp_path, ["{name: x, sql: select 1}"], extra="sql: select 1\n")
+    assert "give tasks, or one of sql, sqlFile or notebook — not both" in said(bundle.validate(tmp_path)[0])

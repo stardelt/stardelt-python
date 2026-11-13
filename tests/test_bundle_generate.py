@@ -2,6 +2,8 @@
 
 import io
 
+import yaml
+
 from stardelt import bundle, cli
 from tests.test_api import CANARY, FakeResponse, FakeSession
 from tests.test_bundle import make
@@ -111,3 +113,29 @@ def test_a_bundle_that_would_not_pick_the_files_up_and_a_missing_manifest_are_re
     code, _, err, session = run(["bundle", "generate", "stardelt", "daily", str(tmp_path / "nowhere")])
     assert code == 2 and "bundle.yaml is missing or cannot be read: write one with `stardelt bundle init`" in err
     assert session.calls == [], "nothing is asked of Nova when there is no bundle"
+
+
+def test_a_pipeline_with_tasks_becomes_one_file_per_task(tmp_path):
+    make(tmp_path)
+    document = {
+        "name": "gold",
+        "ownerGroup": "sales",
+        "tasks": [{"name": "a", "sql": "select 1"}, {"name": "b", "sql": "select 2", "dependsOn": ["a"]}],
+    }
+    code, out, err, session = generate(tmp_path, dict(ANSWER, document=document), "gold")
+    assert (code, out) == (0, "")
+    assert err == (
+        f"stardelt: wrote resources/gold.yaml, sql/gold-a.sql, sql/gold-b.sql in {tmp_path}; now: "
+        f"stardelt bundle validate {tmp_path}\n"
+    )
+    assert yaml.safe_load((tmp_path / "resources" / "gold.yaml").read_text()) == {
+        "name": "gold",
+        "tasks": [
+            {"name": "a", "sqlFile": "sql/gold-a.sql"},
+            {"name": "b", "sqlFile": "sql/gold-b.sql", "dependsOn": ["a"]},
+        ],
+    }
+    assert (tmp_path / "sql" / "gold-a.sql").read_text() == "select 1\n"
+    assert (tmp_path / "sql" / "gold-b.sql").read_text() == "select 2\n"
+    assert not (tmp_path / "sql" / "gold.sql").exists(), "a pipeline with tasks gets no pipeline-level statement file"
+    assert bundle.validate(tmp_path)[0] == []
