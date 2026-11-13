@@ -18,8 +18,11 @@ from stardelt import api, apply, lineage, runs
 
 KEYS = {"bundle", "variables", "include", "files", "migrations", "requires", "targets"}
 KINDS = ("Pipeline", "StreamApp")
-PIPELINE_ONLY = ("sql", "sqlFile", "notebook", "schedule", "params")
+PIPELINE_ONLY = ("sql", "sqlFile", "notebook", "schedule", "params", "tasks")
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+TASK_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+MAX_TASKS = 30
+MAX_TASK_DEPS = 8
 GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 CONNECTION = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -144,6 +147,89 @@ def _stream_problems(where, doc, owner):
     return problems
 
 
+def _notebook_problems(where, notebook, files):
+    """What a notebook source must say, offline. Same rules for a pipeline and for one task."""
+    problems = []
+    if isinstance(notebook, dict) and "file" in notebook and notebook["file"] not in files:
+        problems.append((where, f"notebook file {notebook['file']!r} is not among the bundle's files"))
+    if isinstance(notebook, dict) and "file" in notebook:
+        if not NOTEBOOK_NAME.match(PurePosixPath(str(notebook["file"])).name):
+            problems.append(
+                (where, f"notebook file {notebook['file']!r}: the file name must end in .ipynb, start with a letter or digit and use only letters, digits, '.', '_', '-' and spaces (at most 128 characters)")
+            )
+        if {"name", "objectVersion"} & set(notebook):
+            problems.append((where, "a notebook that names a file cannot also name a version: remove name and objectVersion"))
+    return problems
+
+
+def _task_problems(where, tasks, files):
+    """What a ``tasks`` list must say, offline: names, one source each, and the dependency graph."""
+    problems = []
+    if not isinstance(tasks, list) or not tasks:
+        return [(where, "tasks must be a non-empty list")]
+    if len(tasks) > MAX_TASKS:
+        problems.append((where, f"at most {MAX_TASKS} tasks ({len(tasks)} given)"))
+    names = []
+    for index, task in enumerate(tasks, start=1):
+        if not isinstance(task, dict):
+            problems.append((where, f"task {index} must be a mapping"))
+            continue
+        name = task.get("name")
+        if not isinstance(name, str) or not TASK_NAME.match(name):
+            problems.append((where, f"task {index} needs a name matching ^[a-z0-9][a-z0-9_-]{{0,62}}$"))
+            continue
+        at = f"{where}, task {name!r}"
+        if name in names:
+            problems.append((at, "the name is used twice"))
+        names.append(name)
+        given = [k for k in ("sql", "sqlFile", "notebook") if k in task]
+        if len(given) != 1:
+            problems.append((at, "give exactly one of sql, sqlFile or notebook"))
+        if "sqlFile" in task and task["sqlFile"] not in files:
+            problems.append((at, f"sqlFile {task['sqlFile']!r} is not among the bundle's files"))
+        problems.extend(_notebook_problems(at, task.get("notebook"), files))
+        depends = task.get("dependsOn", [])
+        if not isinstance(depends, list) or not all(isinstance(d, str) for d in depends):
+            problems.append((at, "dependsOn must be a list of task names"))
+            continue
+        if len(depends) > MAX_TASK_DEPS:
+            problems.append((at, f"at most {MAX_TASK_DEPS} dependsOn entries ({len(depends)} given)"))
+        if len(set(depends)) != len(depends):
+            problems.append((at, "dependsOn names a task twice"))
+        if name in depends:
+            problems.append((at, "a task cannot depend on itself"))
+    known = set(names)
+    graph = {}
+    for task in tasks:
+        if not isinstance(task, dict) or not isinstance(task.get("name"), str):
+            continue
+        depends = task.get("dependsOn")
+        depends = depends if isinstance(depends, list) else []
+        for dependency in depends:
+            if isinstance(dependency, str) and dependency not in known:
+                problems.append((f"{where}, task {task['name']!r}", f"dependsOn names {dependency!r}, which is not a task in this file"))
+        graph[task["name"]] = [d for d in depends if isinstance(d, str) and d in known]
+    # A cycle: walk each task's dependencies; a task that reaches itself is part of one.
+    state = {}
+
+    def visit(node, path):
+        if state.get(node) == "done":
+            return False
+        if state.get(node) == "open":
+            problems.append((f"{where}, task {node!r}", "dependsOn is a cycle: " + " → ".join(path + [node])))
+            return True
+        state[node] = "open"
+        for dependency in graph.get(node, []):
+            if visit(dependency, path + [node]):
+                return True
+        state[node] = "done"
+        return False
+
+    for node in graph:
+        visit(node, [])
+    return problems
+
+
 def validate(directory, target=None):
     """Check the bundle in ``directory`` (and only ``target`` when given).
 
@@ -248,21 +334,19 @@ def validate(directory, target=None):
                 )
             if doc.get("ownerGroup", owner) != owner:
                 problems.append((f"{relative} ({tname})", f"ownerGroup {doc['ownerGroup']!r} is not the bundle's group {owner!r}"))
-            given = [k for k in ("sql", "sqlFile", "notebook") if k in doc]
-            if len(given) != 1:
-                problems.append((f"{relative} ({tname})", "give exactly one of sql, sqlFile or notebook"))
-            if "sqlFile" in doc and doc["sqlFile"] not in files:
-                problems.append((f"{relative} ({tname})", f"sqlFile {doc['sqlFile']!r} is not among the bundle's files"))
-            notebook = doc.get("notebook")
-            if isinstance(notebook, dict) and "file" in notebook and notebook["file"] not in files:
-                problems.append((f"{relative} ({tname})", f"notebook file {notebook['file']!r} is not among the bundle's files"))
-            if isinstance(notebook, dict) and "file" in notebook:
-                if not NOTEBOOK_NAME.match(PurePosixPath(str(notebook["file"])).name):
+            if "tasks" in doc:
+                if [k for k in ("sql", "sqlFile", "notebook") if k in doc]:
                     problems.append(
-                        (f"{relative} ({tname})", f"notebook file {notebook['file']!r}: the file name must end in .ipynb, start with a letter or digit and use only letters, digits, '.', '_', '-' and spaces (at most 128 characters)")
+                        (f"{relative} ({tname})", "give tasks, or one of sql, sqlFile or notebook — not both")
                     )
-                if {"name", "objectVersion"} & set(notebook):
-                    problems.append((f"{relative} ({tname})", "a notebook that names a file cannot also name a version: remove name and objectVersion"))
+                problems.extend(_task_problems(f"{relative} ({tname})", doc["tasks"], files))
+            else:
+                given = [k for k in ("sql", "sqlFile", "notebook") if k in doc]
+                if len(given) != 1:
+                    problems.append((f"{relative} ({tname})", "give exactly one of sql, sqlFile or notebook"))
+                if "sqlFile" in doc and doc["sqlFile"] not in files:
+                    problems.append((f"{relative} ({tname})", f"sqlFile {doc['sqlFile']!r} is not among the bundle's files"))
+                problems.extend(_notebook_problems(f"{relative} ({tname})", doc.get("notebook"), files))
         for dup in sorted({n for n in names if names.count(n) > 1}):
             problems.append((where, f"two pipeline files define {dup!r}"))
         for dup in sorted({n for n in streams if streams.count(n) > 1}):
@@ -309,6 +393,9 @@ def render(directory, target, user=None):
         doc.setdefault("ownerGroup", owner)
         if "sqlFile" in doc:
             doc["sql"] = (root / doc.pop("sqlFile")).read_text(encoding="utf-8")
+        for task in doc.get("tasks") or []:
+            if isinstance(task, dict) and "sqlFile" in task:
+                task["sql"] = (root / task.pop("sqlFile")).read_text(encoding="utf-8")
         if mode == "development":
             doc["name"] = f"dev-{_slug(user)}-{doc['name']}"
             doc.pop("schedule", None)
@@ -933,6 +1020,16 @@ def generate(nova, directory, namespace, name):
     statement = document.pop("sql", None)
     pipeline = {"name": name}
     files = {}
+    tasks = document.pop("tasks", None) or []
+    for task in tasks:
+        text = task.pop("sql", None)
+        if text is None:
+            continue
+        relative = f"sql/{name}-{task['name']}.sql"
+        task["sqlFile"] = relative
+        files[relative] = text if text.endswith("\n") else text + "\n"
+    if tasks:
+        pipeline["tasks"] = tasks
     if statement is not None:
         pipeline["sqlFile"] = f"sql/{name}.sql"
         files[pipeline["sqlFile"]] = statement if statement.endswith("\n") else statement + "\n"
