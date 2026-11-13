@@ -118,10 +118,14 @@ def publish(path, group=None, name=None):
     object version a schedule pins), ``sha256`` (of the stored bytes) and the
     parsed ``parameters``; it is printed too. Every failure is one line, with
     Nova's own sentence when the server answered. On the platform Nova is
-    reached through ``STARDELT_NOVA_URL``; off the platform it uses the host
-    and sign-in of ``stardelt login``, or ``STARDELT_TOKEN``.
+    reached through ``STARDELT_NOVA_API_URL`` when the pod sets it (the
+    in-cluster Service) and ``STARDELT_NOVA_URL`` otherwise; off the platform
+    it uses the host and sign-in of ``stardelt login``, or ``STARDELT_TOKEN``.
     """
-    base = os.environ.get("STARDELT_NOVA_URL", "").strip().rstrip("/")
+    base = (
+        os.environ.get("STARDELT_NOVA_API_URL", "")
+        or os.environ.get("STARDELT_NOVA_URL", "")
+    ).strip().rstrip("/")
     if base:
         from stardelt import _token  # the refreshed token sql() uses; deferred to avoid a cycle
 

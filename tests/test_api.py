@@ -102,6 +102,18 @@ def test_base_url_comes_from_the_environment(monkeypatch):
     assert api.Client(token="t").base_url == "https://env.example"
 
 
+def test_api_url_wins_over_the_public_url(monkeypatch):
+    monkeypatch.setenv("STARDELT_NOVA_URL", "https://public.example/")
+    monkeypatch.setenv("STARDELT_NOVA_API_URL", "http://nova.stardelt.svc.cluster.local:8080/")
+    assert api.Client(token="t").base_url == "http://nova.stardelt.svc.cluster.local:8080"
+
+
+def test_public_url_still_works_without_the_api_url(monkeypatch):
+    monkeypatch.setenv("STARDELT_NOVA_URL", "https://public.example/")
+    monkeypatch.delenv("STARDELT_NOVA_API_URL", raising=False)
+    assert api.Client(token="t").base_url == "https://public.example"
+
+
 def test_token_function_is_called_for_every_request():
     tokens = iter(["t1", "t2"])
     c, session = client(FakeResponse(payload={}), FakeResponse(payload={}), token=lambda: next(tokens))

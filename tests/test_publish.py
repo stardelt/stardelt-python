@@ -129,6 +129,13 @@ def test_publish_sends_bearer_and_body(nova, notebook, capsys):
     assert request["body"] == NOTEBOOK
 
 
+def test_publish_uses_the_api_url_when_set(nova, notebook, monkeypatch):
+    monkeypatch.setenv("STARDELT_NOVA_URL", "http://public.invalid")
+    monkeypatch.setenv("STARDELT_NOVA_API_URL", nova.url)
+    stored = stardelt.publish(notebook)
+    assert stored["name"] == notebook.name
+
+
 def test_group_defaults_to_the_only_group(nova, notebook):
     stardelt.publish(notebook)
 

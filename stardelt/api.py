@@ -130,10 +130,18 @@ def _query_value(value):
 
 
 class Client:
-    """Talks to one Nova. ``token`` is a string or a function returning one (called per request)."""
+    """Talks to one Nova. ``token`` is a string or a function returning one (called per request).
+
+    On the platform ``STARDELT_NOVA_API_URL`` (the in-cluster Service) wins over
+    ``STARDELT_NOVA_URL`` (the public origin) when both are set.
+    """
 
     def __init__(self, base_url=None, token=None, session=None, timeout=DEFAULT_TIMEOUT):
-        base = (base_url or os.environ.get("STARDELT_NOVA_URL", "")).strip().rstrip("/")
+        base = (
+            base_url
+            or os.environ.get("STARDELT_NOVA_API_URL", "")
+            or os.environ.get("STARDELT_NOVA_URL", "")
+        ).strip().rstrip("/")
         if not base:
             raise ValueError("base_url is not set and STARDELT_NOVA_URL is empty")
         self.base_url = base
