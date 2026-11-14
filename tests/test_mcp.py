@@ -116,6 +116,23 @@ def test_the_query_profile_tool_reads_the_profile_of_a_query():
     assert CANARY not in json.dumps(reply)
 
 
+def test_the_query_history_tool_reads_the_runs_of_the_same_statement():
+    history = {
+        "runs": [
+            {"id": "q1", "state": "FINISHED", "endedAt": 1, "wallMs": 2000, "executionMs": 1990, "inputBytes": 100, "inputRows": 1},
+        ],
+        "medianWallMs": 2000,
+        "slower": False,
+    }
+    srv, session = server(FakeResponse(payload=history))
+    reply = call(srv, "query_log_history", {"id": "q1"})
+    assert reply["result"]["isError"] is False
+    assert "medianWallMs" in text_of(reply)
+    method, url, _kwargs = session.calls[0]
+    assert (method, url) == ("GET", "https://nova.example/api/query-log/q1/history")
+    assert CANARY not in json.dumps(reply)
+
+
 def test_a_long_answer_is_cut_and_says_so():
     srv, _ = server(FakeResponse(payload={"text": "x" * (mcp.MAX_TEXT + 500)}))
     text = text_of(call(srv, "me"))

@@ -537,6 +537,15 @@
       "query_params": [],
       "body": false
     },
+    "query_log_history": {
+      "method": "GET",
+      "path": "/api/query-log/{id}/history",
+      "path_params": [
+        "id"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "query_log_list": {
       "method": "GET",
       "path": "/api/query-log",

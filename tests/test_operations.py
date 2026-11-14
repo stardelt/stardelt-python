@@ -80,6 +80,14 @@ def test_the_pipeline_retry_operation_is_in_the_contract():
     assert op["body"] is False
 
 
+def test_the_query_history_operation_is_in_the_contract():
+    op = api.operations()["query_log_history"]
+    assert op == {
+        "method": "GET", "path": "/api/query-log/{id}/history", "path_params": ["id"],
+        "query_params": [], "body": False,
+    }
+
+
 def test_stardelt_compute_start_is_a_shortcut_for_the_start_operation():
     code, out, err, session = run(
         ["compute", "start", "trial"],
