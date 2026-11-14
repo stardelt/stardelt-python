@@ -440,6 +440,17 @@
       "query_params": [],
       "body": false
     },
+    "pipelines_run_queries": {
+      "method": "GET",
+      "path": "/api/pipelines/{namespace}/{name}/runs/{run_id}/queries",
+      "path_params": [
+        "namespace",
+        "name",
+        "run_id"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "pipelines_run_retry": {
       "method": "POST",
       "path": "/api/pipelines/{namespace}/{name}/runs/{run_id}/retry",

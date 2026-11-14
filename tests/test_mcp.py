@@ -133,6 +133,21 @@ def test_the_query_history_tool_reads_the_runs_of_the_same_statement():
     assert CANARY not in json.dumps(reply)
 
 
+def test_the_run_queries_tool_reads_the_statements_a_run_sent():
+    statements = {
+        "queries": [
+            {"queryId": "q1", "task": "run", "state": "FINISHED", "startedAt": 1, "wallMs": 2000, "inputBytes": 100, "statement": "select 1"},
+        ]
+    }
+    srv, session = server(FakeResponse(payload=statements))
+    reply = call(srv, "pipelines_run_queries", {"namespace": "stardelt", "name": "shop", "run_id": "scheduled__1"})
+    assert reply["result"]["isError"] is False
+    assert "select 1" in text_of(reply)
+    method, url, _kwargs = session.calls[0]
+    assert (method, url) == ("GET", "https://nova.example/api/pipelines/stardelt/shop/runs/scheduled__1/queries")
+    assert CANARY not in json.dumps(reply)
+
+
 def test_a_long_answer_is_cut_and_says_so():
     srv, _ = server(FakeResponse(payload={"text": "x" * (mcp.MAX_TEXT + 500)}))
     text = text_of(call(srv, "me"))
