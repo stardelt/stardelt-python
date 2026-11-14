@@ -45,6 +45,7 @@ DEFAULT_TOOLS = (
     "pipelines_get",
     "pipelines_run_get",
     "pipelines_run_task_logs",
+    "pipelines_run_queries",
     "notebooks_list",
     "notebooks_versions",
     "notebooks_parameters",
