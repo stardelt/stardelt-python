@@ -105,6 +105,17 @@ def test_an_api_error_is_a_tool_error_with_nova_s_sentence_and_never_the_token()
     assert CANARY not in json.dumps(reply)
 
 
+def test_the_query_profile_tool_reads_the_profile_of_a_query():
+    profile = {"plan": "Output[...]", "operators": [], "spilledBytes": 0, "completedSplits": 1, "inputs": [], "truncated": False}
+    srv, session = server(FakeResponse(payload=profile))
+    reply = call(srv, "query_log_profile", {"id": "q1"})
+    assert reply["result"]["isError"] is False
+    assert "completedSplits" in text_of(reply)
+    method, url, _kwargs = session.calls[0]
+    assert (method, url) == ("GET", "https://nova.example/api/query-log/q1/profile")
+    assert CANARY not in json.dumps(reply)
+
+
 def test_a_long_answer_is_cut_and_says_so():
     srv, _ = server(FakeResponse(payload={"text": "x" * (mcp.MAX_TEXT + 500)}))
     text = text_of(call(srv, "me"))

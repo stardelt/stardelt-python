@@ -553,6 +553,15 @@
       ],
       "body": false
     },
+    "query_log_profile": {
+      "method": "GET",
+      "path": "/api/query-log/{id}/profile",
+      "path_params": [
+        "id"
+      ],
+      "query_params": [],
+      "body": false
+    },
     "query_run": {
       "method": "POST",
       "path": "/api/query",
