@@ -38,6 +38,7 @@ DEFAULT_TOOLS = (
     "catalog_metrics_get",
     "query_log_list",
     "query_log_detail",
+    "query_log_profile",
     "saved_queries_list",
     "pipelines_list",
     "pipelines_get",
